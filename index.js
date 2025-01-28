@@ -61,7 +61,7 @@ app.get('/api/get-csrf-token', (req, res) => {
   res.json({ csrfToken: 'token-generado-de-prueba' });
 });
 
-const PORT = process.env.PORT || 4000;
+const PORT = process.env.PORT || 3001;
 
 https.createServer(credentials, app).listen(PORT, () => {
   console.log(`Servidor corriendo con HTTPS en el puerto ${PORT}`);
