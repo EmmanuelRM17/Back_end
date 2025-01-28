@@ -2,7 +2,16 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const app = express();
-const helmet = require('helmet');  // Usa helmet para manejar las cabeceras de seguridad
+const helmet = require('helmet');
+
+const https = require('https');
+const fs = require('fs');
+
+// Certificados SSL
+const privateKey = fs.readFileSync('C:/xampp/apache/conf/ssl.key/server.key', 'utf8'); // Ruta al archivo .key
+const certificate = fs.readFileSync('C:/xampp/apache/conf/ssl.crt/server.crt', 'utf8'); // Ruta al archivo .crt
+const credentials = { key: privateKey, cert: certificate }; // Agrupación de las credenciales
+
 
 // Configurar las políticas de seguridad de contenido (CSP) con Helmet
 app.use(
@@ -20,7 +29,7 @@ app.use(
 
 // Configuración de CORS para permitir solicitudes desde ambos dominios de frontend
 app.use(cors({
-  origin: ['https://odontologiacarol.onrender.com', 'https://odontologiacarol.isoftuthh.com', 'https://backendodontologia.onrender.com'], // Dominios permitidos
+  origin: ['https://odontologiacarol.onrender.com', 'https://odontologiacarol.isoftuthh.com', 'https://localhost:4000', 'https://localhost', 'https://localhost/carol'], // Dominios permitidos
   credentials: true  // Permitir el envío de cookies y credenciales
 }));
 
@@ -48,8 +57,12 @@ app.use('/api/perfilEmpresa', perfil_empresa);
 app.use('/api/reportes', reportes);
 app.use('/api/redesSociales', redes);
 
-// Iniciar el servidor
-app.listen(3001, () => {
-  console.log('Servidor corriendo en puerto 3001');
+app.get('/api/get-csrf-token', (req, res) => {
+  res.json({ csrfToken: 'token-generado-de-prueba' });
 });
-//ULTIMA
+
+const PORT = process.env.PORT || 4000;
+
+https.createServer(credentials, app).listen(PORT, () => {
+  console.log(`Servidor corriendo con HTTPS en el puerto ${PORT}`);
+});
