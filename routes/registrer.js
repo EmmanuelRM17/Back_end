@@ -45,6 +45,16 @@ cron.schedule('*/10 * * * *', () => {
     eliminarRegistrosIncompletos();
 });
 
+// Generar un token alfanumérico de 6 caracteres (mayúsculas y números)
+function generateToken() {
+    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    let token = '';
+    for (let i = 0; i < 6; i++) {
+        token += characters.charAt(Math.floor(Math.random() * characters.length));
+    }
+    return token;
+}
+
 // Ruta para registrar un nuevo usuario
 router.post('/register', async (req, res) => {
     try {
@@ -137,15 +147,6 @@ router.post('/register', async (req, res) => {
     }
 });
 
-// Genera un token con formato de 12 caracteres, separados en grupos de 3 por guiones
-const generateToken = () => {
-    const characters = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-    let token = '';
-    for (let i = 0; i < 12; i++) {
-        token += characters.charAt(Math.floor(Math.random() * characters.length));
-    }
-    return `${token.slice(0, 3)}-${token.slice(3, 6)}-${token.slice(6, 9)}-${token.slice(9)}`;
-};
 
 // Endpoint para solicitar la recuperación de contraseña
 router.post('/recuperacion', async (req, res) => {
@@ -201,7 +202,7 @@ router.post('/recuperacion', async (req, res) => {
                                 <div style="padding: 10px; background-color: #f0f0f0; border-radius: 5px; display: inline-block; margin: 20px 0;">
                                     <span style="font-size: 24px; font-weight: bold; color: #1976d2;">${token}</span>
                                 </div>
-                                <p style="color: #d32f2f; font-weight: bold; font-size: 18px;">El token debe ser copiado tal y como está, respetando mayúsculas, minúsculas y guiones.</p>
+                                <p style="color: #d32f2f; font-weight: bold; font-size: 18px;">El token debe ser copiado tal y como está, respetando los numeros y mayusculas.</p>
                                 <p><b>Nota:</b> Este código caduca en 15 minutos.</p>
                                 <hr style="margin: 20px 0;">
                                 <footer>
@@ -290,13 +291,25 @@ router.post('/resetPassword', async (req, res) => {
                 return res.status(400).json({ message: 'Token ha expirado.' });
             }
 
-            console.log("Token válido y no ha expirado, actualizando la contraseña...");
+            console.log("Token válido y no ha expirado, verificando contraseña...");
+
+            // Verificar si la nueva contraseña es la misma que la actual
+            const user = result[0];
+            const passwordMatches = await bcrypt.compare(newPassword, user.password);
+            if (passwordMatches) {
+                console.error("La nueva contraseña no puede ser igual a la actual.");
+                return res.status(400).json({ message: 'La nueva contraseña no puede ser igual a la actual.' });
+            }
 
             // Encriptar la nueva contraseña
             const hashedPassword = await bcrypt.hash(xss(newPassword), 10);
 
             // Actualizar la contraseña y limpiar el token
-            const updatePasswordSql = 'UPDATE pacientes SET password = ?, token_verificacion = NULL, token_expiracion = NULL WHERE token_verificacion = ?';
+            const updatePasswordSql = `
+                UPDATE pacientes
+                SET password = ?, token_verificacion = NULL, token_expiracion = NULL
+                WHERE token_verificacion = ?
+            `;
             db.query(updatePasswordSql, [hashedPassword, token], (err, result) => {
                 if (err) {
                     console.error("Error al actualizar la contraseña:", err);
@@ -358,7 +371,7 @@ router.post('/send-verification-email', (req, res) => {
                             <span style="font-size: 24px; font-weight: bold; color: #1976d2;">${verificationToken}</span>
                         </div>
                         <p>Ingresa este código en la página de verificación de tu cuenta.</p>
-                        <p style="color: #d32f2f; font-weight: bold; font-size: 18px;">El token debe ser copiado tal y como está, respetando mayúsculas, minúsculas y guiones.</p>
+                        <p style="color: #d32f2f; font-weight: bold; font-size: 18px;">El token debe ser copiado tal y como está, respetando los numeros y mayusculas.</p>
                         <p><b>Nota:</b> Este código caduca en 15 minutos.</p>
                         <hr style="margin: 20px 0;">
                         <footer>
@@ -417,137 +430,173 @@ router.post('/verify-token', (req, res) => {
     });
 });
 
+//envio de correo electronico
 router.post('/send-verification-code', async (req, res) => {
     const { email } = req.body;
 
     try {
-        // Verificar si el usuario es paciente o administrador
-        const findUserSql = `
-            SELECT 'pacientes' AS userType, email 
-            FROM pacientes WHERE email = ? 
-            UNION 
-            SELECT 'administradores' AS userType, email 
-            FROM administradores WHERE email = ?
-        `;
+        // Consultar la tabla de pacientes
+        const findPatientSql = `SELECT 'pacientes' AS userType, email FROM pacientes WHERE email = ?`;
+        const findAdminSql = `SELECT 'administradores' AS userType, email FROM administradores WHERE email = ?`;
 
-        db.query(findUserSql, [email, email], (err, result) => {
+        // Buscar en la tabla de pacientes
+        db.query(findPatientSql, [email], (err, patientResult) => {
             if (err) {
-                console.error('Error al buscar el usuario:', err);
-                return res.status(500).json({ message: 'Error en el servidor.' });
+                console.error('Error al buscar en la tabla de pacientes:', err);
+                return res.status(500).json({ message: 'Error en el servidor al buscar en pacientes.' });
             }
 
-            if (result.length === 0) {
-                return res.status(404).json({ message: 'Usuario no encontrado.' });
-            }
-
-            const userType = result[0].userType;
-
-            // Generar código de verificación
-            const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-            const codeExpiration = new Date(Date.now() + 10 * 60000); // Expira en 10 minutos
-
-            // Actualizar la tabla correspondiente
-            const updateCodeSql = `
-                UPDATE ${userType} 
-                SET token_verificacion = ?, token_expiracion = ? 
-                WHERE email = ?
-            `;
-
-            db.query(updateCodeSql, [verificationCode, codeExpiration, email], (err) => {
-                if (err) {
-                    console.error('Error al guardar el código:', err);
-                    return res.status(500).json({ message: 'Error al guardar el código de verificación.' });
-                }
-
-                // Enviar el código por correo
-                const mailOptions = {
-                    from: 'odontologiacarol2024@gmail.com',
-                    to: email,
-                    subject: 'Código de Verificación - Odontología Carol',
-                    html: `
-                        <div style="font-family: Arial, sans-serif; text-align: center;">
-                            <h1>Odontología Carol</h1>
-                            <p>Tu código de verificación es:</p>
-                            <p style="font-size: 24px; font-weight: bold;">${verificationCode}</p>
-                            <p>Este código expira en 10 minutos.</p>
-                        </div>
-                    `,
-                };
-
-                transporter.sendMail(mailOptions, (err) => {
+            if (patientResult.length > 0) {
+                // Si se encuentra en pacientes
+                handleVerificationCode('pacientes', email, res);
+            } else {
+                // Buscar en la tabla de administradores
+                db.query(findAdminSql, [email], (err, adminResult) => {
                     if (err) {
-                        console.error('Error al enviar el correo:', err);
-                        return res.status(500).json({ message: 'Error al enviar el correo.' });
+                        console.error('Error al buscar en la tabla de administradores:', err);
+                        return res.status(500).json({ message: 'Error en el servidor al buscar en administradores.' });
                     }
 
-                    res.status(200).json({ message: 'Código de verificación enviado al correo.' });
+                    if (adminResult.length > 0) {
+                        // Si se encuentra en administradores
+                        handleVerificationCode('administradores', email, res);
+                    } else {
+                        // Si no se encuentra en ninguna tabla
+                        return res.status(404).json({ message: 'Usuario no encontrado en pacientes ni administradores.' });
+                    }
                 });
-            });
+            }
         });
     } catch (error) {
-        console.error('Error al enviar el código:', error);
+        console.error('Error general en el servidor:', error);
         res.status(500).json({ message: 'Error en el servidor.' });
     }
 });
+
+// Función para manejar el envío del código de verificación
+function handleVerificationCode(userType, email, res) {
+    // Generar código de verificación
+    const verificationCode = generateToken(); // Código de 6 dígitos
+    const codeExpiration = new Date(Date.now() + 10 * 60000); // Expira en 10 minutos
+
+    // Actualizar la tabla correspondiente con el código y su expiración
+    const updateCodeSql = `
+        UPDATE ${userType}
+        SET token_verificacion = ?, token_expiracion = ?
+        WHERE email = ?
+    `;
+
+    db.query(updateCodeSql, [verificationCode, codeExpiration, email], async (err) => {
+        if (err) {
+            console.error(`Error al guardar el código en ${userType}:`, err);
+            return res.status(500).json({ message: 'Error al guardar el código de verificación.' });
+        }
+        const mailOptions = {
+            from: 'odontologiacarol2024@gmail.com',
+            to: email,
+            subject: 'Código de Verificación - Odontología Carol',
+            html: `
+            <div style="font-family: Arial, sans-serif; color: #333;">
+                <div style="text-align: center; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #f9f9f9;">
+                    <h1 style="color: #1976d2; font-size: 24px; margin-bottom: 10px;">Odontología Carol</h1>
+                    <p style="font-size: 16px; margin: 0;">¡Hola!</p>
+                    <p style="font-size: 16px; margin: 10px 0 20px;">Gracias por confiar en <b>Odontología Carol</b>. Para continuar, ingresa el siguiente código de verificación en la página correspondiente:</p>
+                    <div style="display: inline-block; background-color: #e3f2fd; border-radius: 8px; padding: 15px 25px; margin: 20px 0;">
+                        <span style="font-size: 28px; font-weight: bold; color: #1976d2;">${verificationCode}</span>
+                    </div>
+                    <p style="font-size: 14px; color: #616161; margin: 20px 0;">Este código es válido por 10 minutos. Por favor, no lo compartas con nadie.</p>
+                    <p style="font-size: 14px; color: #d32f2f; font-weight: bold;">Copia el código exactamente como está, respetando mayúsculas y minúsculas.</p>
+                    <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
+                    <footer style="font-size: 12px; color: #9e9e9e;">
+                        <p>Odontología Carol - Cuidando de tu salud bucal</p>
+                        <p>Este es un correo generado automáticamente, por favor no respondas a este mensaje.</p>
+                    </footer>
+                </div>
+            </div>
+            `,
+        };
+        try {
+            // Enviar el correo
+            await transporter.sendMail(mailOptions);
+            return res.status(200).json({ message: 'Código de verificación enviado al correo.' });
+        } catch (mailError) {
+            console.error('Error al enviar el correo:', mailError);
+            return res.status(500).json({ message: 'Error al enviar el correo de verificación.' });
+        }
+    });
+}
 
 router.post('/verify-verification-code', async (req, res) => {
     const { email, code } = req.body;
 
     try {
-        // Verificar si el email pertenece a un paciente o administrador
-        const findUserSql = `
-            SELECT 'pacientes' AS userType, token_verificacion, token_expiracion 
-            FROM pacientes WHERE email = ? 
-            UNION 
-            SELECT 'administradores' AS userType, token_verificacion, token_expiracion 
-            FROM administradores WHERE email = ?
-        `;
+        const findPatientSql = `SELECT 'pacientes' AS userType, token_verificacion, token_expiracion FROM pacientes WHERE email = ?`;
+        const findAdminSql = `SELECT 'administradores' AS userType, token_verificacion, token_expiracion FROM administradores WHERE email = ?`;
 
-        db.query(findUserSql, [email, email], (err, result) => {
+        // Buscar en pacientes
+        db.query(findPatientSql, [email], (err, patientResult) => {
             if (err) {
-                console.error('Error al buscar el usuario:', err);
-                return res.status(500).json({ message: 'Error en el servidor.' });
+                console.error('Error al buscar en la tabla de pacientes:', err);
+                return res.status(500).json({ message: 'Error en el servidor al buscar en pacientes.' });
             }
 
-            if (result.length === 0) {
-                return res.status(404).json({ message: 'Usuario no encontrado.' });
+            if (patientResult.length > 0) {
+                // Verificar el código para pacientes
+                handleCodeVerification('pacientes', patientResult[0], code, email, res, 'pacientes');
+            } else {
+                // Buscar en administradores
+                db.query(findAdminSql, [email], (err, adminResult) => {
+                    if (err) {
+                        console.error('Error al buscar en la tabla de administradores:', err);
+                        return res.status(500).json({ message: 'Error en el servidor al buscar en administradores.' });
+                    }
+
+                    if (adminResult.length > 0) {
+                        // Verificar el código para administradores
+                        handleCodeVerification('administradores', adminResult[0], code, email, res, 'administradores');
+                    } else {
+                        // Usuario no encontrado
+                        return res.status(404).json({ message: 'Usuario no encontrado en pacientes ni administradores.' });
+                    }
+                });
             }
-
-            const user = result[0];
-            const userType = user.userType;
-
-            // Verificar el código y su expiración
-            if (user.token_verificacion !== code) {
-                console.error('Código incorrecto.');
-                return res.status(400).json({ message: 'Código incorrecto.' });
-            }
-
-            if (new Date() > new Date(user.token_expiracion)) {
-                console.error('El código ha expirado.');
-                return res.status(400).json({ message: 'El código ha expirado.' });
-            }
-
-            // Limpiar el código de la tabla correspondiente
-            const clearCodeSql = `
-                UPDATE ${userType} 
-                SET token_verificacion = NULL, token_expiracion = NULL 
-                WHERE email = ?
-            `;
-
-            db.query(clearCodeSql, [email], (err) => {
-                if (err) {
-                    console.error('Error al limpiar el código:', err);
-                    return res.status(500).json({ message: 'Error al limpiar el código de verificación.' });
-                }
-
-                res.status(200).json({ message: 'Código verificado correctamente.' });
-            });
         });
     } catch (error) {
-        console.error('Error al verificar el código:', error);
+        console.error('Error general en el servidor:', error);
         res.status(500).json({ message: 'Error en el servidor.' });
     }
 });
 
+// Función para verificar el código
+function handleCodeVerification(userType, user, code, email, res, userTypeResponse) {
+    if (user.token_verificacion !== code) {
+        return res.status(400).json({ message: 'Código incorrecto.' });
+    }
+
+    if (new Date() > new Date(user.token_expiracion)) {
+        return res.status(400).json({ message: 'El código ha expirado.' });
+    }
+
+    // Limpiar el token de la base de datos
+    const clearCodeSql = `
+        UPDATE ${userType}
+        SET token_verificacion = NULL, token_expiracion = NULL
+        WHERE email = ?
+    `;
+
+    db.query(clearCodeSql, [email], (err) => {
+        if (err) {
+            console.error(`Error al limpiar el token en ${userType}:`, err);
+            return res.status(500).json({ message: 'Error al limpiar el token de verificación.' });
+        }
+
+        // Agregar depuración y responder con tipo de usuario
+        console.log(`Código verificado correctamente para el usuario: ${email}, tipo: ${userTypeResponse}`);
+        res.status(200).json({
+            message: 'Código verificado correctamente.',
+            userType: userTypeResponse, // Asegurar envío del tipo de usuario
+        });
+    });
+}
 
 module.exports = router;

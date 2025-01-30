@@ -1,14 +1,31 @@
 const mysql = require('mysql2');
 
-// Crear un pool de conexiones a MySQL (Hostinger)
+// Configuración para ambos entornos
+const isLocalhost = true; // Cambia a true para usar base de datos local
+
+const config = isLocalhost
+  ? {
+      // Configuración local
+      host: 'localhost',
+      user: 'root', // o tu usuario local
+      password: '', // tu contraseña local
+      database: 'db_carol', // nombre de tu base de datos local
+      port: 3306,
+    }
+  : {
+      // Configuración de producción (la que tenías)
+      host: '193.203.166.102',
+      user: 'u666156220_carol',
+      password: '20221058Emma',
+      database: 'u666156220_db_carol',
+      port: 3306,
+    };
+
+// Crear un pool de conexiones a MySQL
 const pool = mysql.createPool({
-  host: '193.203.166.102',  
-  user: 'u666156220_carol',
-  password: '20221058Emma',
-  database: 'u666156220_db_carol',
-  port: 3306,  // Asegúrate de usar el puerto correcto
+  ...config,
   waitForConnections: true,
-  connectionLimit: 10,  // Número máximo de conexiones simultáneas
+  connectionLimit: 10,
   queueLimit: 0
 });
 
@@ -19,7 +36,8 @@ pool.getConnection((err, connection) => {
     return;
   }
   console.log('Conexión a MySQL exitosa');
-  connection.release();  // Liberar la conexión después de usarla
+  console.log('Conectado a la base de datos en:', config.host);
+  connection.release();
 });
 
-module.exports = pool;  // Exportar el pool para usarlo en otros archivos
+module.exports = pool;
