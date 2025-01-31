@@ -11,8 +11,6 @@ app.use(cookieParser());
 // Configuración CORS esencial para cookies
 app.use(cors({
   origin: [
-    "https://odontologiacarol.onrender.com",
-    "https://odontologiacarol.isoftuthh.com",
     "http://localhost:3000",
     "http://localhost:3001"
   ],
@@ -32,8 +30,6 @@ app.use(helmet({
       imgSrc: ["'self'", "https://www.google.com", "https://www.gstatic.com"],
       connectSrc: [
         "'self'",
-        "https://odontologiacarol.onrender.com",
-        "https://odontologiacarol.isoftuthh.com",
         "http://localhost:3000",
         "http://localhost:3001"
       ]
