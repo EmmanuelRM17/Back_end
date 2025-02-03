@@ -1,7 +1,8 @@
 const mysql = require('mysql2');
+require('dotenv').config(); // Cargar variables de entorno
 
 // Configuración para ambos entornos
-const isLocalhost = true; // Cambia a true para usar base de datos local
+const isLocalhost = false; // Cambia a true para usar base de datos local
 
 const config = isLocalhost
   ? {
@@ -13,11 +14,11 @@ const config = isLocalhost
       port: 3306,
     }
   : {
-      // Configuración de producción (la que tenías)
-      host: '193.203.166.102',
-      user: 'u666156220_carol',
-      password: '20221058Emma',
-      database: 'u666156220_db_carol',
+      // Configuración de producción (Hostinger)
+      host: 'srv865.hstgr.io',
+      user: 'u478151766_carol',
+      password: 'XbQvcW0a!',
+      database: 'u478151766_Odontology',
       port: 3306,
     };
 
