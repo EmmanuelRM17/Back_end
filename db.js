@@ -15,8 +15,8 @@ const config = isLocalhost
     }
   : {
       // Configuración de producción (Hostinger)
-      host: 'srv865.hstgr.io',
-      user: 'u478151766_carol',
+      host: '191.96.56.204',
+      user: '	u478151766_carol',
       password: 'XbQvcW0a!',
       database: 'u478151766_Odontology',
       port: 3306,
