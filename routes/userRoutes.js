@@ -261,12 +261,13 @@ async function autenticarUsuario(
       
         // Configuración mejorada de la cookie
         res.cookie('carolDental', sessionToken, {
-          httpOnly: true,  // Cambiado a true por seguridad
-          secure: process.env.NODE_ENV === 'production',  // true en producción
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production', // true en producción (HTTPS)
           sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
           path: '/',
           maxAge: 24 * 60 * 60 * 1000  // 24 horas
         });
+        
       
         return res.status(200).json({
           message: 'Inicio de sesión exitoso',
