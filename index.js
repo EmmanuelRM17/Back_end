@@ -12,7 +12,8 @@ app.use(cookieParser());
 app.use(cors({
   origin: [
     "http://localhost:3000",
-    "http://localhost:3001"
+    "https://back-end-4803.onrender.com",
+    "https://odontologiacarol.com"
   ],
   credentials: true,
   methods: ["GET", "POST", "PUT", "DELETE"],
@@ -31,7 +32,8 @@ app.use(helmet({
       connectSrc: [
         "'self'",
         "http://localhost:3000",
-        "http://localhost:3001"
+        "https://back-end-4803.onrender.com",
+        "https://odontologiacarol.com/"
       ]
     }
   }
