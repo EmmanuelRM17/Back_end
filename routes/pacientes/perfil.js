@@ -12,13 +12,13 @@ router.get("/:id", async (req, res) => {
             return res.status(400).json({ message: "ID y email son requeridos." });
         }
 
-        // Buscar al paciente por ID y email
         const query = `
             SELECT id, nombre, aPaterno, aMaterno, fechaNacimiento, tipoTutor, 
-                   nombreTutor, genero, lugar, telefono, email, alergias 
+                   nombreTutor, genero, lugar, telefono, email, alergias, estado 
             FROM pacientes 
             WHERE id = ? AND email = ?
         `;
+
 
         db.query(query, [id, email], (err, results) => {
             if (err) {
