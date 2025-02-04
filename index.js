@@ -47,14 +47,15 @@ app.use(express.json());
 // Tus rutas existentes
 const userRoutes = require("./routes/userRoutes");
 const Registrer = require("./routes/registrer");
-const politicasRoutes = require("./routes/inf_politicasRoutes.js");
-const deslindeRoutes = require("./routes/inf_deslindelegal.js");
-const terminosRoutes = require("./routes/inf_terminosYcondicion.js");
-const perfil_empresa = require("./routes/inf_perfilEmpresa.js");
-const reportes = require("./routes/inf_reportes.js");
-const redes = require("./routes/inf_redessociales.js");
-const perfil_paciente = require("./routes/perfil_paciente.js");
+const politicasRoutes = require("./routes/inf_politicasRoutes");
+const deslindeRoutes = require("./routes/inf_deslindelegal");
+const terminosRoutes = require("./routes/inf_terminosYcondicion");
+const perfil_empresa = require("./routes/inf_perfilEmpresa");
+const reportes = require("./routes/inf_reportes");
+const redes = require("./routes/inf_redessociales");
 
+//pacientes
+const p_perfil = require("./routes/pacientes/perfil")
 // Asignar rutas
 app.use("/api", Registrer);
 app.use("/api/users", userRoutes);
@@ -68,7 +69,7 @@ app.use("/api/reportes", reportes);
 app.use("/api/redesSociales", redes);
 
 //pacientes
-app.use("/api/profile", perfil_paciente);
+app.use("/api/profile", p_perfil);
 
 app.listen(3001, () => {
   console.log("Servidor corriendo en puerto 3001");

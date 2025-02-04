@@ -283,7 +283,6 @@ async function autenticarUsuario(
   );
 }
 
-
 router.get("/check-auth", (req, res) => {
   // Obtener la cookie carolDental desde la solicitud
   const sessionToken = req.cookies?.carolDental;
