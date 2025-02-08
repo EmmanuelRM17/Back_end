@@ -82,7 +82,7 @@ router.post("/login", async (req, res) => {
           .json({ message: "Proporciona correo y contraseña." });
       }
 
-      // Verificar si es administrador o paciente
+      // Verificar si es administrador, paciente o empleado
       const checkAdminSql = "SELECT * FROM administradores WHERE email = ?";
       db.query(checkAdminSql, [email], async (err, resultAdmin) => {
         if (err) {
@@ -104,7 +104,26 @@ router.post("/login", async (req, res) => {
             LOCK_TIME_MINUTES
           );
         }
+        // Consultar Empleados
+      const checkEmpleadoSql = "SELECT * FROM empleados WHERE email = ?";
+      db.query(checkEmpleadoSql, [email], async (err, resultEmpleado) => {
+        if (err) {
+          logger.error(`Error al verificar correo del empleado: ${err.message}`);
+          return res.status(500).json({ message: "Error al verificar correo." });
+        }
 
+        if (resultEmpleado.length > 0) {
+          const empleado = resultEmpleado[0];
+          return autenticarUsuario(
+            empleado,
+            ipAddress,
+            password,
+            "empleado",
+            res,
+            MAX_ATTEMPTS,
+            LOCK_TIME_MINUTES
+          );
+        }
         const checkUserSql = "SELECT * FROM pacientes WHERE email = ?";
         db.query(checkUserSql, [email], async (err, resultPaciente) => {
           if (err) {
@@ -132,6 +151,7 @@ router.post("/login", async (req, res) => {
           );
         });
       });
+      });
     } catch (error) {
       logger.error(`Error en verificación del captcha: ${error.message}`);
       return res.status(500).json({ message: "Error en la autenticación." });
@@ -153,12 +173,14 @@ async function autenticarUsuario(
   LOCK_TIME_MINUTES
 ) {
   const checkAttemptsSql = `
-        SELECT * FROM inf_login_attempts
-        WHERE ${
-          tipoUsuario === "administrador" ? "administrador_id" : "paciente_id"
-        } = ? AND ip_address = ?
-        ORDER BY fecha_hora DESC LIMIT 1
-    `;
+    SELECT * FROM inf_login_attempts
+    WHERE ${
+      tipoUsuario === "administrador" ? "administrador_id" : 
+      tipoUsuario === "empleado" ? "empleado_id" : "paciente_id"
+    } = ? AND ip_address = ?
+    ORDER BY fecha_hora DESC LIMIT 1
+`;
+    
   db.query(
     checkAttemptsSql,
     [usuario.id, ipAddress],
@@ -201,16 +223,14 @@ async function autenticarUsuario(
 
         // Insertar o actualizar el intento fallido
         const attemptSql = lastAttempt
-          ? `UPDATE inf_login_attempts SET intentos_fallidos = ?, fecha_bloqueo = ?, fecha_hora = ? WHERE ${
-              tipoUsuario === "administrador"
-                ? "administrador_id"
-                : "paciente_id"
-            } = ? AND ip_address = ?`
-          : `INSERT INTO inf_login_attempts (${
-              tipoUsuario === "administrador"
-                ? "administrador_id"
-                : "paciente_id"
-            }, ip_address, exitoso, intentos_fallidos, fecha_bloqueo, fecha_hora) VALUES (?, ?, 0, ?, ?, ?)`;
+        ? `UPDATE inf_login_attempts SET intentos_fallidos = ?, fecha_bloqueo = ?, fecha_hora = ? WHERE ${
+            tipoUsuario === "administrador" ? "administrador_id" :
+            tipoUsuario === "empleado" ? "empleado_id" : "paciente_id"
+          } = ? AND ip_address = ?`
+        : `INSERT INTO inf_login_attempts (${
+            tipoUsuario === "administrador" ? "administrador_id" :
+            tipoUsuario === "empleado" ? "empleado_id" : "paciente_id"
+          }, ip_address, exitoso, intentos_fallidos, fecha_bloqueo, fecha_hora) VALUES (?, ?, 0, ?, ?, ?)`;
 
         const params = lastAttempt
           ? [
@@ -253,8 +273,10 @@ async function autenticarUsuario(
 
       const sessionToken = generateToken();
       const updateTokenSql = `UPDATE ${
-        tipoUsuario === "administrador" ? "administradores" : "pacientes"
+        tipoUsuario === "administrador" ? "administradores" :
+        tipoUsuario === "empleado" ? "empleados" : "pacientes"
       } SET cookie = ? WHERE id = ?`;
+    
       
       db.query(updateTokenSql, [sessionToken, usuario.id], (err) => {
         if (err) return res.status(500).json({ message: 'Error en el servidor.' });
@@ -304,9 +326,14 @@ router.get("/check-auth", (req, res) => {
       FROM administradores 
       WHERE cookie = ?
   `;
-
-  // Primero busca en la tabla de pacientes
-  db.query(queryPacientes, [sessionToken], (err, resultsPacientes) => {
+  //Consulta para buscar si el token existe en la tabla de empleados
+   const queryEmpleados = `
+    SELECT idempleados, nombre, email, 'empleado' as tipo
+    FROM empleados 
+    WHERE cookie = ?
+  `;
+    // Primero busca en la tabla de pacientes
+    db.query(queryPacientes, [sessionToken], (err, resultsPacientes) => {
       if (err) {
           console.error("Error al verificar autenticación en pacientes:", err);
           return res.status(500).json({ authenticated: false, message: "Error al verificar autenticación" });
@@ -325,6 +352,25 @@ router.get("/check-auth", (req, res) => {
               }
           });
       }
+
+      db.query(queryEmpleados, [sessionToken], (err, resultsEmpleados) => {
+        if (err) {
+            console.error("Error al verificar autenticación en empleados:", err);
+            return res.status(500).json({ authenticated: false, message: "Error al verificar autenticación" });
+        }
+    
+        if (resultsEmpleados.length > 0) {
+            const userData = resultsEmpleados[0];
+            return res.json({ 
+                authenticated: true,
+                user: {
+                    id: userData.id,
+                    nombre: userData.nombre,
+                    email: userData.email,
+                    tipo: userData.tipo
+                }
+            });
+        }
 
       // Si no se encuentra en pacientes, busca en administradores
       db.query(queryAdministradores, [sessionToken], (err, resultsAdmin) => {
@@ -353,6 +399,7 @@ router.get("/check-auth", (req, res) => {
               message: "Token no válido" 
           });
       });
+    });
   });
 });
 
@@ -377,6 +424,7 @@ router.post("/logout", (req, res) => {
   // Queries separados
   const queryPacientes = `UPDATE pacientes SET cookie = NULL WHERE cookie = ?`;
   const queryAdministradores = `UPDATE administradores SET cookie = NULL WHERE cookie = ?`;
+  const queryEmpleados = `UPDATE empleados SET cookie = NULL WHERE cookie = ?`;
 
   // Primero intenta en pacientes
   db.query(queryPacientes, [sessionToken], (err, resultPacientes) => {
@@ -385,6 +433,13 @@ router.post("/logout", (req, res) => {
           return res.status(500).json({ 
               message: "Error al cerrar sesión." 
           });
+      }
+
+      db.query(queryEmpleados, [sessionToken], (err, resultEmpleados) => {
+        if (err) {
+            console.error("Error al limpiar token en empleados:", err);
+            return res.status(500).json({ message: "Error al cerrar sesión."     
+         });          
       }
 
       // Luego en administradores
@@ -397,7 +452,7 @@ router.post("/logout", (req, res) => {
           }
 
           // Verifica si se actualizó algún registro
-          if (resultPacientes.affectedRows === 0 && resultAdmin.affectedRows === 0) {
+          if (resultPacientes.affectedRows === 0 && resultAdmin.affectedRows === 0 && resultEmpleados.affectedRows === 0) {
               console.log("No se encontró el token en la base de datos");
               // Aún consideramos el logout exitoso ya que la cookie fue eliminada
               return res.status(200).json({ 
@@ -410,6 +465,7 @@ router.post("/logout", (req, res) => {
               message: "Sesión cerrada exitosamente." 
           });
       });
+    });
   });
 });
 
