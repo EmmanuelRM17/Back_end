@@ -19,7 +19,7 @@ const rateLimiter = new RateLimiterMemory({
 const transporter = nodemailer.createTransport({
     host: 'smtp.hostinger.com', // Servidor SMTP de Hostinger
     port: 465, // Usa 587 si necesitas STARTTLS
-    secure: true, // true para SSL (465), false para STARTTLS (587)
+    secure: true, 
     auth: {
         user: 'sistema@odontologiacarol.com', // Tu correo empresarial
         pass: 'sP8+?;Vs:', // La contraseña del correo en Hostinger
@@ -193,7 +193,7 @@ router.post('/recuperacion', async (req, res) => {
 
                 // Formatear el contenido HTML del correo de recuperación de contraseña
                 const mailOptions = {
-                    from: 'odontologiacarol2024@gmail.com',
+                    from: '"Odontología Carol" <sistema@odontologiacarol.com>',
                     to: email,
                     subject: 'Recuperación de Contraseña - Odontología Carol',
                     html: `
@@ -362,7 +362,7 @@ router.post('/send-verification-email', (req, res) => {
 
             // Formatear el contenido HTML del correo
             const mailOptions = {
-                from: 'odontologiacarol2024@gmail.com',
+                from: '"Odontología Carol" <sistema@odontologiacarol.com>',
                 to: email,
                 subject: 'Verificación de Correo - Odontología Carol',
                 html: `
@@ -496,7 +496,7 @@ function handleVerificationCode(userType, email, res) {
             return res.status(500).json({ message: 'Error al guardar el código de verificación.' });
         }
         const mailOptions = {
-            from: 'odontologiacarol2024@gmail.com',
+            from: '"Odontología Carol" <sistema@odontologiacarol.com>',
             to: email,
             subject: 'Código de Verificación - Odontología Carol',
             html: `
