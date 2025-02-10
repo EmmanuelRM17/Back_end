@@ -434,14 +434,15 @@ router.post('/verify-token', (req, res) => {
     });
 });
 
-//envio de correo electronico
+// Envío de correo electrónico
 router.post('/send-verification-code', async (req, res) => {
     const { email } = req.body;
 
     try {
-        // Consultar la tabla de pacientes
+        // Consultar en las diferentes tablas
         const findPatientSql = `SELECT 'pacientes' AS userType, email FROM pacientes WHERE email = ?`;
         const findAdminSql = `SELECT 'administradores' AS userType, email FROM administradores WHERE email = ?`;
+        const findEmployeeSql = `SELECT 'empleados' AS userType, email FROM empleados WHERE email = ?`;
 
         // Buscar en la tabla de pacientes
         db.query(findPatientSql, [email], (err, patientResult) => {
@@ -452,30 +453,44 @@ router.post('/send-verification-code', async (req, res) => {
 
             if (patientResult.length > 0) {
                 // Si se encuentra en pacientes
-                handleVerificationCode('pacientes', email, res);
-            } else {
-                // Buscar en la tabla de administradores
-                db.query(findAdminSql, [email], (err, adminResult) => {
+                return handleVerificationCode('pacientes', email, res);
+            }
+
+            // Buscar en la tabla de administradores
+            db.query(findAdminSql, [email], (err, adminResult) => {
+                if (err) {
+                    console.error('Error al buscar en la tabla de administradores:', err);
+                    return res.status(500).json({ message: 'Error en el servidor al buscar en administradores.' });
+                }
+
+                if (adminResult.length > 0) {
+                    // Si se encuentra en administradores
+                    return handleVerificationCode('administradores', email, res);
+                }
+
+                // Buscar en la tabla de empleados
+                db.query(findEmployeeSql, [email], (err, employeeResult) => {
                     if (err) {
-                        console.error('Error al buscar en la tabla de administradores:', err);
-                        return res.status(500).json({ message: 'Error en el servidor al buscar en administradores.' });
+                        console.error('Error al buscar en la tabla de empleados:', err);
+                        return res.status(500).json({ message: 'Error en el servidor al buscar en empleados.' });
                     }
 
-                    if (adminResult.length > 0) {
-                        // Si se encuentra en administradores
-                        handleVerificationCode('administradores', email, res);
-                    } else {
-                        // Si no se encuentra en ninguna tabla
-                        return res.status(404).json({ message: 'Usuario no encontrado en pacientes ni administradores.' });
+                    if (employeeResult.length > 0) {
+                        // Si se encuentra en empleados
+                        return handleVerificationCode('empleados', email, res);
                     }
+
+                    // Si no se encuentra en ninguna tabla
+                    return res.status(404).json({ message: 'Usuario no encontrado en pacientes, administradores ni empleados.' });
                 });
-            }
+            });
         });
     } catch (error) {
         console.error('Error general en el servidor:', error);
         res.status(500).json({ message: 'Error en el servidor.' });
     }
 });
+
 
 // Función para manejar el envío del código de verificación
 function handleVerificationCode(userType, email, res) {
