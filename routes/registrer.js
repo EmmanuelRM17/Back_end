@@ -14,14 +14,18 @@ const rateLimiter = new RateLimiterMemory({
     points: 10,
     duration: 3 * 60 * 60,
 });
+
 // Configuración de nodemailer
 const transporter = nodemailer.createTransport({
-    service: 'gmail',
+    host: 'smtp.hostinger.com', // Servidor SMTP de Hostinger
+    port: 465, // Usa 587 si necesitas STARTTLS
+    secure: true, // true para SSL (465), false para STARTTLS (587)
     auth: {
-        user: 'odontologiacarol2024@gmail.com',
-        pass: 'qrvg bsfi ntxa yxgz',
+        user: 'sistema@odontologiacarol.com', // Tu correo empresarial
+        pass: 'sP8+?;Vs:', // La contraseña del correo en Hostinger
     },
 });
+
 
 // Función para eliminar registros incompletos después de 10 minutos
 const eliminarRegistrosIncompletos = () => {
