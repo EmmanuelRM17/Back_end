@@ -46,7 +46,6 @@ router.post('/insert', async (req, res) => {
     }
 });
 
-
 // Ruta para actualizar una política existente
 router.put('/update/:id', async (req, res) => {
     const { id } = req.params;

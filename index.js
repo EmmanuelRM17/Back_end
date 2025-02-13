@@ -53,6 +53,7 @@ const terminosRoutes = require("./routes/inf_terminosYcondicion");
 const perfil_empresa = require("./routes/inf_perfilEmpresa");
 const reportes = require("./routes/inf_reportes");
 const redes = require("./routes/inf_redessociales");
+const preguntas = require("./routes/admin/preguntas");
 
 //pacientes
 const p_perfil = require("./routes/pacientes/perfil")
@@ -67,6 +68,7 @@ app.use("/api/termiCondicion", terminosRoutes);
 app.use("/api/perfilEmpresa", perfil_empresa);
 app.use("/api/reportes", reportes);
 app.use("/api/redesSociales", redes);
+app.use("/api/preguntas", preguntas);
 
 //pacientes
 app.use("/api/profile", p_perfil);
