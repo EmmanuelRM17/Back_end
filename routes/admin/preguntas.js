@@ -6,24 +6,29 @@ const logger = require("../../utils/logger");
 
 // Verificar si el correo está registrado
 router.post("/verificar-correo", async (req, res) => {
-  const email = xss(req.body.email);
-
-  if (!email) return res.status(400).json({ message: "El correo es requerido." });
-
-  try {
-    const query = "SELECT id AS paciente_id, nombre FROM pacientes WHERE email = ?";
-    const [rows] = await db.promise().query(query, [email]);
-
-    if (rows.length > 0) {
-      return res.json({ exists: true, name: rows[0].nombre, paciente_id: rows[0].paciente_id });
-    } else {
-      return res.json({ exists: false });
+    const email = xss(req.body.email);
+  
+    if (!email) return res.status(400).json({ message: "El correo es requerido." });
+  
+    try {
+      const query = "SELECT id AS paciente_id, nombre, aPaterno FROM pacientes WHERE email = ?";
+      const [rows] = await db.promise().query(query, [email]);
+  
+      if (rows.length > 0) {
+        return res.json({ 
+          exists: true, 
+          name: rows[0].nombre, 
+          apellido_paterno: rows[0].aPaterno, // Aquí usamos "aPaterno" de la BDD
+          paciente_id: rows[0].paciente_id 
+        });
+      } else {
+        return res.json({ exists: false });
+      }
+    } catch (error) {
+      logger.error(`Error al verificar el correo: ${error.message}`);
+      res.status(500).json({ message: "Error del servidor." });
     }
-  } catch (error) {
-    logger.error(`Error al verificar el correo: ${error.message}`);
-    res.status(500).json({ message: "Error del servidor." });
-  }
-});
+  }); 
 
 // ✅ 2️⃣ Obtener todas las preguntas frecuentes
 router.get("/get-all", async (req, res) => {
