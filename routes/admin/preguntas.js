@@ -30,19 +30,26 @@ router.post("/verificar-correo", async (req, res) => {
     }
   }); 
 
-// ✅ 2️⃣ Obtener todas las preguntas frecuentes
+// Obtener hasta 7 preguntas frecuentes con respuesta
 router.get("/get-all", async (req, res) => {
-  try {
-    const query = "SELECT id, pregunta AS question, respuesta AS answer FROM preguntas_frecuentes ORDER BY fecha_creacion DESC";
-    const [rows] = await db.promise().query(query);
-
-    res.json(rows);
-  } catch (error) {
-    logger.error(`Error al obtener preguntas frecuentes: ${error.message}`);
-    res.status(500).json({ message: "Error del servidor." });
-  }
-});
-
+    try {
+      const query = `
+        SELECT id, pregunta AS question, respuesta AS answer 
+        FROM preguntas_frecuentes 
+        WHERE respuesta IS NOT NULL AND TRIM(respuesta) <> ''
+        ORDER BY RAND() 
+        LIMIT 7
+      `;
+      
+      const [rows] = await db.promise().query(query);
+  
+      res.json(rows);
+    } catch (error) {
+      logger.error(`Error al obtener preguntas frecuentes: ${error.message}`);
+      res.status(500).json({ message: "Error del servidor." });
+    }
+  });
+  
 // Agregar una nueva pregunta
 router.post("/nueva", async (req, res) => {
   const { email, name, question, paciente_id } = req.body;
