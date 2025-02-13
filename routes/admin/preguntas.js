@@ -30,13 +30,15 @@ router.post("/verificar-correo", async (req, res) => {
     }
   }); 
 
-// Obtener hasta 7 preguntas frecuentes con respuesta
+// Obtener hasta 7 preguntas frecuentes con respuesta válida
 router.get("/get-all", async (req, res) => {
     try {
       const query = `
         SELECT id, pregunta AS question, respuesta AS answer 
         FROM preguntas_frecuentes 
-        WHERE respuesta IS NOT NULL AND TRIM(respuesta) <> ''
+        WHERE respuesta IS NOT NULL 
+        AND TRIM(respuesta) <> '' 
+        AND respuesta NOT LIKE '%Pendiente%'
         ORDER BY RAND() 
         LIMIT 7
       `;
@@ -48,7 +50,8 @@ router.get("/get-all", async (req, res) => {
       logger.error(`Error al obtener preguntas frecuentes: ${error.message}`);
       res.status(500).json({ message: "Error del servidor." });
     }
-  });
+});
+
   
 // Agregar una nueva pregunta
 router.post("/nueva", async (req, res) => {
