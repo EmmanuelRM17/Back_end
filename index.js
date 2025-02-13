@@ -47,6 +47,7 @@ app.use(express.json());
 // Tus rutas existentes
 const userRoutes = require("./routes/userRoutes");
 const Registrer = require("./routes/registrer");
+
 const politicasRoutes = require("./routes/inf_politicasRoutes");
 const deslindeRoutes = require("./routes/inf_deslindelegal");
 const terminosRoutes = require("./routes/inf_terminosYcondicion");
