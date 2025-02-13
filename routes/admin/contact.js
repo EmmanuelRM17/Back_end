@@ -1,6 +1,6 @@
 const express = require('express');
 const nodemailer = require('nodemailer');
-const db = require('../config/db'); // Conexión a MySQL
+const db = require('../../db'); // Conexión a MySQL
 const { body, validationResult } = require('express-validator'); // Importamos express-validator
 const router = express.Router();
 
