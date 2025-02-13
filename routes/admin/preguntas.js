@@ -1,8 +1,8 @@
 const express = require("express");
 const router = express.Router();
-const db = require("../db");
+const db = require("../../db");
 const xss = require("xss");
-const logger = require("../utils/logger");
+const logger = require("../../utils/logger");
 
 // Verificar si el correo está registrado
 router.post("/verificar-correo", async (req, res) => {
@@ -38,7 +38,7 @@ router.get("/get-all", async (req, res) => {
   }
 });
 
-// ✅ 3️⃣ Agregar una nueva pregunta
+// Agregar una nueva pregunta
 router.post("/nueva", async (req, res) => {
   const { email, name, question, paciente_id } = req.body;
 
@@ -60,7 +60,7 @@ router.post("/nueva", async (req, res) => {
   }
 });
 
-// ✅ 4️⃣ Responder una pregunta (solo administradores o empleados)
+// Responder una pregunta (solo administradores o empleados)
 router.put("/responder/:id", async (req, res) => {
   const { respuesta } = req.body;
   const { id } = req.params;
@@ -84,7 +84,7 @@ router.put("/responder/:id", async (req, res) => {
   }
 });
 
-// ✅ 5️⃣ Eliminar una pregunta (solo administradores)
+// Eliminar una pregunta (solo administradores)
 router.delete("/eliminar/:id", async (req, res) => {
   const { id } = req.params;
 
