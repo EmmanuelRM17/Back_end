@@ -55,7 +55,7 @@ const perfil_empresa = require("./routes/admin/inf/inf_perfilEmpresa");
 const reportes = require("./routes/admin/inf/inf_reportes");
 const redes = require("./routes/admin/inf/inf_redessociales");
 const preguntas = require("./routes/admin/preguntas");
-const contactanos = require("./routes/admin/contact")]
+const contactanos = require("./routes/admin/contact");
 const expediente = require("./routes/empleado/expedientClinic");
 
 //pacientes
