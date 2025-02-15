@@ -2,44 +2,52 @@ const express = require("express");
 const router = express.Router();
 const db = require("../../db");
 
-// Obtener el expediente clínico de un paciente por su ID
+// Obtener el historial médico de un paciente por su ID
 router.get("/:paciente_id", async (req, res) => {
-    const { id } = req.params;
     try {
-        // Obtener la información del paciente
-        const pacienteQuery = "SELECT * FROM pacientes WHERE id = ?";
-        const [paciente] = await db.query(pacienteQuery, [id]);
-        console.log("Respuesta paciente:", paciente); // Verifica la respuesta completa
+        const { paciente_id } = req.params;
 
-        if (!paciente.length) {
-            return res.status(404).json({ message: "Paciente no encontrado" });
+        if (!paciente_id) {
+            return res.status(400).json({ message: "El ID del paciente es requerido." });
         }
 
-        // Obtener el historial médico del paciente
-        const historialQuery = "SELECT * FROM historial_medico WHERE paciente_id = ?";
-        const [historial] = await db.query(historialQuery, [id]);
-        console.log("Historial:", historial); // Verifica la respuesta completa
+        // Query para obtener el historial médico, citas y servicios
+        const query = `
+            SELECT 
+                hm.id, 
+                hm.paciente_id, 
+                hm.cita_id, 
+                hm.fecha_registro, 
+                hm.enfermedades_previas, 
+                hm.tratamientos_recientes,
+                c.fecha_hora,
+                c.estado,
+                c.notas,
+                s.title AS servicio_title,
+                s.description AS servicio_description,
+                s.duration AS servicio_duration,
+                s.price AS servicio_price
+            FROM historial_medico hm
+            LEFT JOIN citas c ON hm.cita_id = c.id
+            LEFT JOIN servicios s ON c.servicio_id = s.id
+            WHERE hm.paciente_id = ?
+        `;
 
-        // Obtener los tratamientos de seguimiento del paciente
-        const tratamientosQuery = "SELECT * FROM seguimiento_tratamientos WHERE paciente_id = ?";
-        const [tratamientos] = await db.query(tratamientosQuery, [id]);
-        console.log("Tratamientos:", tratamientos); // Verifica la respuesta completa
+        db.query(query, [paciente_id], (err, results) => {
+            if (err) {
+                console.error("Error al obtener el historial médico:", err);
+                return res.status(500).json({ message: "Error en el servidor." });
+            }
 
-        // Obtener las recetas médicas del paciente
-        const recetasQuery = "SELECT * FROM recetas_medicas WHERE paciente_id = ?";
-        const [recetas] = await db.query(recetasQuery, [id]);
-        console.log("Recetas:", recetas); // Verifica la respuesta completa
+            if (results.length === 0) {
+                return res.status(404).json({ message: "Historial médico no encontrado." });
+            }
 
-        // Retornar los datos del expediente clínico
-        res.json({
-            paciente: paciente[0], // Asegúrate de que solo estás enviando el primer registro si es un array
-            historial: historial.length > 0 ? historial : null,
-            tratamientos: tratamientos.length > 0 ? tratamientos : null,
-            recetas: recetas.length > 0 ? recetas : null
+            return res.json(results); // Devuelve el historial médico con datos de citas y servicios
         });
     } catch (error) {
-        console.error("Error obteniendo el expediente clínico:", error);
-        res.status(500).json({ message: "Error en el servidor" });
+        console.error("Error en /historial/:paciente_id:", error);
+        res.status(500).json({ message: "Error en el servidor." });
     }
 });
 
