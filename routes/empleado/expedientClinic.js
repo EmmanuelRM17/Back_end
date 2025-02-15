@@ -4,7 +4,7 @@ const db = require("../../db");
 
 // Obtener el historial médico de un paciente por su ID
 // Ejemplo de ruta para obtener el historial médico de un paciente por ID
-router.get("/historial/:paciente_id", async (req, res) => {
+router.get("/:paciente_id", async (req, res) => {
     try {
         const { paciente_id } = req.params;
 
