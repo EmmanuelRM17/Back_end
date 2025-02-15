@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require("../../db");
 
 // Obtener el historial médico de un paciente por su ID
-router.get("/paciente/:id", async (req, res) => {
+router.get("/:id", async (req, res) => {
     const { id } = req.params;  // Obtener el ID del paciente desde los parámetros de la URL
 
     try {
