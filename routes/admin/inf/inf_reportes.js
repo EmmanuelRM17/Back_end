@@ -1,6 +1,6 @@
 const express = require("express");
 const router = express.Router();
-const db = require("../db");
+const db = require("../../../db");
 
 // Endpoint para obtener intentos de login
 router.get("/login-attempts", async (_req, res) => {

@@ -1,5 +1,5 @@
 const express = require('express');
-const db = require('../db'); // Asegúrate de que la ruta a tu conexión de base de datos sea correcta
+const db = require('../../../db'); // Asegúrate de que la ruta a tu conexión de base de datos sea correcta
 const router = express.Router();
 //POLITICAS
 // Ruta para insertar una nueva política de privacidad
@@ -13,12 +13,12 @@ router.post('/insert', async (req, res) => {
 
     try {
         // Desactivar todas las políticas actuales antes de insertar una nueva
-        await db.promise().query(`UPDATE politicas_privacidad SET estado = 'inactivo'`);
+        await db.promise().query(`UPDATE inf_politicas_privacidad SET estado = 'inactivo'`);
 
         // Determinar el número de la próxima versión principal
         const [result] = await db.promise().query(`
             SELECT MAX(CAST(version AS DECIMAL(5, 1))) AS max_version 
-            FROM politicas_privacidad
+            FROM inf_politicas_privacidad
         `);
 
         let newVersion;
@@ -32,7 +32,7 @@ router.post('/insert', async (req, res) => {
         }
 
         const insertQuery = `
-            INSERT INTO politicas_privacidad (numero_politica, titulo, contenido, estado, version, fecha_creacion, fecha_actualizacion)
+            INSERT INTO inf_politicas_privacidad (numero_politica, titulo, contenido, estado, version, fecha_creacion, fecha_actualizacion)
             VALUES (0, ?, ?, 'activo', ?, NOW(), NOW())
         `;
 
@@ -46,7 +46,6 @@ router.post('/insert', async (req, res) => {
     }
 });
 
-
 // Ruta para actualizar una política existente
 router.put('/update/:id', async (req, res) => {
     const { id } = req.params;
@@ -59,7 +58,7 @@ router.put('/update/:id', async (req, res) => {
 
     try {
         // Obtener la versión actual de la política específica a actualizar
-        const getPolicyQuery = `SELECT version FROM politicas_privacidad WHERE id = ?`;
+        const getPolicyQuery = `SELECT version FROM inf_politicas_privacidad WHERE id = ?`;
         const [policy] = await db.promise().query(getPolicyQuery, [id]);
 
         if (policy.length === 0) {
@@ -70,11 +69,11 @@ router.put('/update/:id', async (req, res) => {
         const newVersion = (currentVersion + 0.1).toFixed(1); // Nueva versión incrementada en 0.1
 
         // Desactivar la política actual
-        await db.promise().query(`UPDATE politicas_privacidad SET estado = 'inactivo' WHERE id = ?`, [id]);
+        await db.promise().query(`UPDATE inf_politicas_privacidad SET estado = 'inactivo' WHERE id = ?`, [id]);
 
         // Insertar la nueva política con versión incrementada y estado activo
         const insertQuery = `
-            INSERT INTO politicas_privacidad (numero_politica, titulo, contenido, estado, version, fecha_creacion, fecha_actualizacion)
+            INSERT INTO inf_politicas_privacidad (numero_politica, titulo, contenido, estado, version, fecha_creacion, fecha_actualizacion)
             VALUES (0, ?, ?, 'activo', ?, NOW(), NOW())
         `;
         await db.promise().query(insertQuery, [titulo, contenido, newVersion]);
@@ -91,7 +90,7 @@ router.get('/get/:id', async (req, res) => {
     const { id } = req.params;
 
     try {
-        const [result] = await db.promise().query(`SELECT * FROM politicas_privacidad WHERE id = ?`, [id]);
+        const [result] = await db.promise().query(`SELECT * FROM inf_politicas_privacidad WHERE id = ?`, [id]);
         if (result.length === 0) {
             return res.status(404).send('Política no encontrada.');
         }
@@ -106,10 +105,10 @@ router.get('/get/:id', async (req, res) => {
 router.put('/deactivate/:id', (req, res) => {
     const { id } = req.params;
 
-    const query = 'UPDATE politicas_privacidad SET estado = ? WHERE id = ?';
+    const query = 'UPDATE inf_politicas_privacidad SET estado = ? WHERE id = ?';
 
     db.promise().query(query, ['inactivo', id])
-        .then(result => {
+        .then(() => {
             res.status(200).send('Política de privacidad eliminada (lógicamente) con éxito');
         })
         .catch(err => {
@@ -120,7 +119,7 @@ router.put('/deactivate/:id', (req, res) => {
 
 // Ruta para obtener la política activa más reciente
 router.get('/getpolitica', (req, res) => {
-    const query = 'SELECT * FROM politicas_privacidad WHERE estado = "activo" ORDER BY version DESC LIMIT 1';
+    const query = 'SELECT * FROM inf_politicas_privacidad WHERE estado = "activo" ORDER BY version DESC LIMIT 1';
 
     db.promise().query(query)
         .then(([results]) => {
@@ -137,7 +136,7 @@ router.get('/getpolitica', (req, res) => {
 
 // Ruta para obtener todas las políticas (activas e inactivas)
 router.get('/getAllPoliticas', (req, res) => {
-    const query = 'SELECT * FROM politicas_privacidad ORDER BY numero_politica, CAST(version AS DECIMAL(5,1)) ASC';
+    const query = 'SELECT * FROM inf_politicas_privacidad ORDER BY numero_politica, CAST(version AS DECIMAL(5,1)) ASC';
 
     db.promise().query(query)
         .then(([results]) => {
@@ -151,7 +150,7 @@ router.get('/getAllPoliticas', (req, res) => {
 
 // Endpoint para obtener las políticas de privacidad activas
 router.get('/politicas_privacidad', (req, res) => {
-    const sql = 'SELECT * FROM politicas_privacidad WHERE estado = "activo"';
+    const sql = 'SELECT * FROM inf_politicas_privacidad WHERE estado = "activo"';
     db.query(sql, (err, result) => {
       if (err) {
         return res.status(500).json({ message: 'Error al obtener las políticas de privacidad.' });

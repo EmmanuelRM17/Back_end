@@ -1,5 +1,5 @@
 const express = require('express');
-const db = require('../db'); // Ruta correcta a tu archivo de configuración de base de datos
+const db = require('../../../db'); 
 const multer = require('multer');
 const router = express.Router();
 
@@ -35,7 +35,7 @@ router.post('/insert', (req, res, next) => {
         return res.status(400).send('Nombre de empresa y correo electrónico son obligatorios');
     }
 
-    const query = `INSERT INTO perfil_empresa (nombre_empresa, direccion, telefono, correo_electronico, descripcion, logo, slogan) 
+    const query = `INSERT INTO inf_perfil_empresa (nombre_empresa, direccion, telefono, correo_electronico, descripcion, logo, slogan) 
                    VALUES (?, ?, ?, ?, ?, ?, ?)`;
 
     db.query(query, [nombre_empresa, direccion, telefono, correo_electronico, descripcion, logo, slogan], (err, result) => {
@@ -49,7 +49,7 @@ router.post('/insert', (req, res, next) => {
 
 // Endpoint para obtener el perfil de empresa
 router.get('/get', (req, res) => {
-    const query = `SELECT * FROM perfil_empresa LIMIT 1`;
+    const query = `SELECT * FROM inf_perfil_empresa LIMIT 1`;
     db.query(query, (err, results) => {
         if (err) {
             console.log(err);
@@ -92,7 +92,7 @@ router.put('/updateLogo', (req, res, next) => {
         return res.status(400).send('No se ha proporcionado un logo para actualizar');
     }
 
-    const query = `UPDATE perfil_empresa SET logo = ? WHERE id_empresa = ?`;
+    const query = `UPDATE inf_perfil_empresa SET logo = ? WHERE id_empresa = ?`;
 
     db.query(query, [logo, id_empresa], (err, result) => {
         if (err) {
@@ -120,7 +120,7 @@ router.put('/updateDatos', (req, res) => {
         return res.status(400).send('Nombre de empresa y correo electrónico son obligatorios');
     }
 
-    const query = `UPDATE perfil_empresa SET nombre_empresa = ?, direccion = ?, telefono = ?, correo_electronico = ?, descripcion = ?, slogan = ? WHERE id_empresa = ?`;
+    const query = `UPDATE inf_perfil_empresa SET nombre_empresa = ?, direccion = ?, telefono = ?, correo_electronico = ?, descripcion = ?, slogan = ? WHERE id_empresa = ?`;
 
     const queryParams = [nombre_empresa, direccion, telefono, correo_electronico, descripcion, slogan, id_empresa];
 
@@ -142,7 +142,7 @@ router.put('/updateDatos', (req, res) => {
 router.delete('/delete/:id', (req, res) => {
     const { id } = req.params;
 
-    const query = `DELETE FROM perfil_empresa WHERE id_empresa = ?`;
+    const query = `DELETE FROM inf_perfil_empresa WHERE id_empresa = ?`;
     db.query(query, [id], (err, result) => {
         if (err) {
             console.log(err);
@@ -154,7 +154,7 @@ router.delete('/delete/:id', (req, res) => {
 
 // Endpoint para obtener el nombre de la empresa y el logo
 router.get('/getTitleAndLogo', (req, res) => {
-    const query = `SELECT nombre_empresa, logo FROM perfil_empresa LIMIT 1`;
+    const query = `SELECT nombre_empresa, logo FROM inf_perfil_empresa LIMIT 1`;
 
     db.query(query, (err, results) => {
         if (err) {
@@ -181,5 +181,19 @@ router.get('/getTitleAndLogo', (req, res) => {
     });
 });
 
+// Endpoint para obtener los datos de la empresa
+router.get('/empresa', (req, res) => {
+    const query = 'SELECT nombre_empresa, slogan, direccion, telefono, correo_electronico FROM inf_perfil_empresa LIMIT 1'; // Obtener el primer registro
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener los datos de la empresa:', err);
+            return res.status(500).json({ message: 'Error al obtener los datos de la empresa.' });
+        }
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'No se encontraron datos de la empresa.' });
+        }
+        res.status(200).json(results[0]); // Retornar el primer resultado
+    });
+});
 // Exportar el router
 module.exports = router;

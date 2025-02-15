@@ -1,5 +1,5 @@
 const express = require('express');
-const db = require('../db'); // Ruta correcta a tu archivo de configuración de base de datos
+const db = require('../../../db'); // Ruta correcta a tu archivo de configuración de base de datos
 const router = express.Router();
 
 // Validación básica de URL (simplificada)
