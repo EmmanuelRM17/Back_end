@@ -3,7 +3,7 @@ const router = express.Router();
 const db = require("../../db");
 
 // Obtener el expediente clínico de un paciente por su ID
-router.get("/expedientPaciente/:id", async (req, res) => {
+router.get("/paciente/:id", async (req, res) => {
     const { id } = req.params;
     try {
         const pacienteQuery = "SELECT * FROM pacientes WHERE id = ?";

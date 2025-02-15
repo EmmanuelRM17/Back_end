@@ -76,7 +76,7 @@ app.use("/api/contacto",contactanos)
 
 
 //empleado
-app.use("/api/ExpedienteClinico", ExpedienteClinico);
+app.use("/api/expediente", ExpedienteClinico);
 
 //pacientes
 app.use("/api/profile", p_perfil);
