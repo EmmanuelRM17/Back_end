@@ -52,8 +52,9 @@ const politicasRoutes = require("./routes/admin/inf/inf_politicasRoutes");
 const deslindeRoutes = require("./routes/admin/inf/inf_deslindelegal");
 const terminosRoutes = require("./routes/admin/inf/inf_terminosYcondicion");
 const perfil_empresa = require("./routes/admin/inf/inf_perfilEmpresa");
-const reportes = require("./routes/admin/inf/inf_reportes");
 const redes = require("./routes/admin/inf/inf_redessociales");
+const servicios=  require("./routes/servicios"); 
+const reportes = require("./routes/admin/inf/inf_reportes");
 const preguntas = require("./routes/admin/preguntas");
 const contactanos = require("./routes/admin/contact");
 const expediente = require("./routes/empleado/expedientClinic");
@@ -69,8 +70,9 @@ app.use("/api/politicas", politicasRoutes);
 app.use("/api/deslinde", deslindeRoutes);
 app.use("/api/termiCondicion", terminosRoutes);
 app.use("/api/perfilEmpresa", perfil_empresa);
-app.use("/api/reportes", reportes);
 app.use("/api/redesSociales", redes);
+app.use("/api/reportes", reportes);
+app.use("/api/servicios", servicios)
 app.use("/api/preguntas", preguntas);
 app.use("/api/contacto",contactanos)
 
