@@ -93,4 +93,22 @@ router.get('/get/:id', async (req, res) => {
     }
 });
 
+router.get('/detalles', async (req, res) => {
+    try {
+        const sql = 'SELECT servicio_id, tipo, descripcion FROM servicio_detalles';
+        
+        db.query(sql, (err, result) => {
+            if (err) {
+                logger.error('Error al obtener detalles de servicios: ', err);
+                return res.status(500).json({ message: 'Error al obtener los detalles de los servicios.' });
+            }
+            res.status(200).json(result);
+        });
+    } catch (error) {
+        logger.error('Error en la ruta /api/servicios/detalles: ', error);
+        res.status(500).json({ message: 'Error en el servidor.' });
+    }
+});
+
+
 module.exports = router;
