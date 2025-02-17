@@ -77,7 +77,7 @@ app.use("/api/preguntas", preguntas);
 app.use("/api/contacto",contactanos)
 
 
-//empleado
+//empleadooos
 app.use("/api/expediente",expediente);
 
 //pacientes
