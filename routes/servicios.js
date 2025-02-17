@@ -19,42 +19,51 @@ router.get('/all', async (req, res) => {
     }
 });
 
-
+//obtener servicio por el id
 router.get('/get/:id', async (req, res) => {
     const { id } = req.params;
     
+    console.log("🔍 Recibiendo solicitud para ID:", id); // 👀 Verifica si llega correctamente
+
+    if (!id) {
+        console.error("❌ ID no recibido en la solicitud.");
+        return res.status(400).json({ message: "ID de servicio no proporcionado" });
+    }
+
     try {
-        // Obtener datos principales del servicio
         const servicioQuery = `
             SELECT id, title, description, duration, price, category 
             FROM servicios 
             WHERE id = ?
         `;
 
-        // Obtener detalles adicionales desde `servicio_detalles`
-        const detallesQuery = `
-            SELECT tipo, descripcion 
-            FROM servicio_detalles 
-            WHERE servicio_id = ?
-        `;
-
         db.query(servicioQuery, [id], (err, servicioResult) => {
             if (err) {
-                logger.error(`Error al obtener el servicio con ID ${id}: `, err);
+                console.error(`❌ Error en la consulta a la base de datos para ID ${id}:`, err);
                 return res.status(500).json({ message: 'Error al obtener el servicio.' });
             }
+
+            console.log("🔍 Resultado de la consulta:", servicioResult); // 👀 Verifica si encontró algo
+
             if (servicioResult.length === 0) {
+                console.warn(`⚠️ No se encontró el servicio con ID ${id} en la base de datos.`);
                 return res.status(404).json({ message: 'Servicio no encontrado.' });
             }
 
-            // Si el servicio existe, obtener los detalles
+            const detallesQuery = `
+                SELECT tipo, descripcion 
+                FROM servicio_detalles 
+                WHERE servicio_id = ?
+            `;
+
             db.query(detallesQuery, [id], (err, detallesResult) => {
                 if (err) {
-                    logger.error(`Error al obtener los detalles del servicio con ID ${id}: `, err);
+                    console.error(`❌ Error en la consulta de detalles para ID ${id}:`, err);
                     return res.status(500).json({ message: 'Error al obtener los detalles del servicio.' });
                 }
 
-                // Organizar los detalles en categorías
+                console.log("🔍 Detalles obtenidos:", detallesResult);
+
                 const detalles = {
                     benefits: [],
                     includes: [],
@@ -80,18 +89,19 @@ router.get('/get/:id', async (req, res) => {
                 });
 
                 const servicio = {
-                    ...servicioResult[0], // Datos principales del servicio
-                    ...detalles // Beneficios, incluye, preparación, cuidados posteriores
+                    ...servicioResult[0],
+                    ...detalles
                 };
 
                 res.status(200).json(servicio);
             });
         });
     } catch (error) {
-        logger.error('Error en la ruta /api/servicios/get/:id: ', error);
+        console.error('❌ Error en la ruta /api/servicios/get/:id: ', error);
         res.status(500).json({ message: 'Error en el servidor.' });
     }
 });
+
 
 router.get('/detalles', async (req, res) => {
     try {
