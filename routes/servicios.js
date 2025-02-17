@@ -5,7 +5,7 @@ const logger = require('../utils/logger');
 
 router.get('/all', async (req, res) => {
     try {
-        const sql = 'SELECT id, title, description, category FROM servicios';
+        const sql = 'SELECT id, title, description, category, price, duration FROM servicios';
         db.query(sql, (err, result) => {
             if (err) {
                 logger.error('Error al obtener servicios: ', err);
@@ -14,10 +14,11 @@ router.get('/all', async (req, res) => {
             res.status(200).json(result);
         });
     } catch (error) {
-        logger.error('Error en la ruta /api/servicios: ', error);
+        logger.error('Error en la ruta /api/servicios/all: ', error);
         res.status(500).json({ message: 'Error en el servidor.' });
     }
 });
+
 
 router.get('/get/:id', async (req, res) => {
     const { id } = req.params;
@@ -78,7 +79,6 @@ router.get('/get/:id', async (req, res) => {
                     }
                 });
 
-                // Respuesta final con toda la información del servicio
                 const servicio = {
                     ...servicioResult[0], // Datos principales del servicio
                     ...detalles // Beneficios, incluye, preparación, cuidados posteriores
