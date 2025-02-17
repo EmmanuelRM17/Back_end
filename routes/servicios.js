@@ -110,5 +110,79 @@ router.get('/detalles', async (req, res) => {
     }
 });
 
+// Endpoint para editar un servicio
+router.put('/update/:id', async (req, res) => {
+    const { id } = req.params;
+    const { title, description, duration, price, category, benefits, includes, preparation, aftercare } = req.body;
+  
+    // Actualizar datos principales en la tabla "servicios"
+    const updateQuery = 'UPDATE servicios SET title = ?, description = ?, duration = ?, price = ?, category = ? WHERE id = ?';
+    db.query(updateQuery, [title, description, duration, price, category, id], (err, updateResult) => {
+      if (err) {
+        logger.error(`Error al actualizar servicio con ID ${id}: `, err);
+        return res.status(500).json({ message: 'Error al actualizar el servicio.' });
+      }
+      // Eliminar detalles actuales
+      const deleteDetailsQuery = 'DELETE FROM servicio_detalles WHERE servicio_id = ?';
+      db.query(deleteDetailsQuery, [id], (err, deleteResult) => {
+        if (err) {
+          logger.error(`Error al eliminar detalles del servicio con ID ${id}: `, err);
+          return res.status(500).json({ message: 'Error al actualizar los detalles del servicio.' });
+        }
+  
+        // Preparar nuevos detalles a insertar
+        const detailsToInsert = [];
+        if (Array.isArray(benefits)) {
+          benefits.forEach(b => { if (b.trim()) detailsToInsert.push(['beneficio', b, id]); });
+        }
+        if (Array.isArray(includes)) {
+          includes.forEach(i => { if (i.trim()) detailsToInsert.push(['incluye', i, id]); });
+        }
+        if (Array.isArray(preparation)) {
+          preparation.forEach(p => { if (p.trim()) detailsToInsert.push(['preparacion', p, id]); });
+        }
+        if (Array.isArray(aftercare)) {
+          aftercare.forEach(a => { if (a.trim()) detailsToInsert.push(['cuidado', a, id]); });
+        }
+  
+        if (detailsToInsert.length === 0) {
+          return res.status(200).json({ message: 'Servicio actualizado correctamente.' });
+        }
+  
+        const insertQuery = 'INSERT INTO servicio_detalles (tipo, descripcion, servicio_id) VALUES ?';
+        db.query(insertQuery, [detailsToInsert], (err, insertResult) => {
+          if (err) {
+            logger.error(`Error al insertar detalles del servicio con ID ${id}: `, err);
+            return res.status(500).json({ message: 'Error al actualizar los detalles del servicio.' });
+          }
+          res.status(200).json({ message: 'Servicio actualizado correctamente.' });
+        });
+      });
+    });
+  });
+  
+  // Endpoint para eliminar un servicio
+  router.delete('/delete/:id', async (req, res) => {
+    const { id } = req.params;
+  
+    // Primero eliminar los detalles asociados
+    const deleteDetailsQuery = 'DELETE FROM servicio_detalles WHERE servicio_id = ?';
+    db.query(deleteDetailsQuery, [id], (err, detailsResult) => {
+      if (err) {
+        logger.error(`Error al eliminar detalles del servicio con ID ${id}: `, err);
+        return res.status(500).json({ message: 'Error al eliminar los detalles del servicio.' });
+      }
+      // Luego eliminar el servicio principal
+      const deleteServiceQuery = 'DELETE FROM servicios WHERE id = ?';
+      db.query(deleteServiceQuery, [id], (err, serviceResult) => {
+        if (err) {
+          logger.error(`Error al eliminar el servicio con ID ${id}: `, err);
+          return res.status(500).json({ message: 'Error al eliminar el servicio.' });
+        }
+        res.status(200).json({ message: 'Servicio eliminado correctamente.' });
+      });
+    });
+  });
+  
 
 module.exports = router;
