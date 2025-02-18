@@ -314,33 +314,28 @@ router.post('/categorias', async (req, res) => {
     // Verificar las categorías actuales
     const sqlCheck = `SHOW COLUMNS FROM servicios LIKE 'category'`;
     db.query(sqlCheck, (err, result) => {
-      if (err) {
-        logger.error('Error al verificar categoría:', err);
-        return res.status(500).json({ message: 'Error al verificar la categoría.' });
-      }
+      if (err) return res.status(500).json({ message: 'Error al verificar la categoría.' });
 
       const enumValues = result[0].Type.match(/'([^']+)'/g).map(val => val.replace(/'/g, ''));
-      if (enumValues.includes(`'${name}'`)) {
+
+      if (enumValues.includes(name)) {
         return res.status(400).json({ message: `La categoría '${name}' ya existe.` });
       }
 
-      // Agregar la nueva categoría al ENUM
-      const newEnumValues = [...enumValues, `'${name}'`].join(',');
+      // Agregar nueva categoría al ENUM
+      const newEnumValues = [...enumValues, name].map(v => `'${v}'`).join(',');
       const sqlAlter = `ALTER TABLE servicios MODIFY COLUMN category ENUM(${newEnumValues}) NOT NULL`;
 
       db.query(sqlAlter, (err) => {
-        if (err) {
-          logger.error('Error al agregar la categoría:', err);
-          return res.status(500).json({ message: 'Error al agregar la categoría.' });
-        }
+        if (err) return res.status(500).json({ message: 'Error al agregar la categoría.' });
         res.status(201).json({ message: 'Categoría agregada exitosamente.', category: name });
       });
     });
   } catch (error) {
-    logger.error('Error en /api/servicios/categorias (POST):', error);
     res.status(500).json({ message: 'Error en el servidor.' });
   }
 });
+
 //endpoint para actualizar
 router.put('/categorias/:oldName', async (req, res) => {
   const { oldName } = req.params;
@@ -353,57 +348,46 @@ router.put('/categorias/:oldName', async (req, res) => {
   try {
     const sqlCheck = `SHOW COLUMNS FROM servicios LIKE 'category'`;
     db.query(sqlCheck, (err, result) => {
-      if (err) {
-        logger.error('Error al obtener categorías ENUM:', err);
-        return res.status(500).json({ message: 'Error al obtener las categorías.' });
-      }
+      if (err) return res.status(500).json({ message: 'Error al obtener las categorías.' });
 
       const enumValues = result[0].Type.match(/'([^']+)'/g).map(val => val.replace(/'/g, ''));
-      if (!enumValues.includes(`'${oldName}'`)) {
+
+      if (!enumValues.includes(oldName)) {
         return res.status(400).json({ message: `La categoría '${oldName}' no existe.` });
       }
-      if (enumValues.includes(`'${newName}'`)) {
+      if (enumValues.includes(newName)) {
         return res.status(400).json({ message: `La categoría '${newName}' ya existe.` });
       }
 
-      // Reemplazar la categoría en los servicios
+      // 1️⃣ Actualizar todos los servicios que tienen la categoría antigua
       const sqlUpdate = `UPDATE servicios SET category = ? WHERE category = ?`;
       db.query(sqlUpdate, [newName, oldName], (err) => {
-        if (err) {
-          logger.error('Error al actualizar servicios con la nueva categoría:', err);
-          return res.status(500).json({ message: 'Error al actualizar los servicios.' });
-        }
+        if (err) return res.status(500).json({ message: 'Error al actualizar los servicios.' });
 
-        // Modificar el ENUM en la tabla
-        const newEnumValues = enumValues.map(val => (val === `'${oldName}'` ? `'${newName}'` : val)).join(',');
+        // 2️⃣ Modificar el ENUM en la tabla
+        const newEnumValues = enumValues.map(val => (val === oldName ? newName : val)).map(v => `'${v}'`).join(',');
         const sqlAlter = `ALTER TABLE servicios MODIFY COLUMN category ENUM(${newEnumValues}) NOT NULL`;
 
         db.query(sqlAlter, (err) => {
-          if (err) {
-            logger.error('Error al modificar ENUM de categorías:', err);
-            return res.status(500).json({ message: 'Error al modificar las categorías en la base de datos.' });
-          }
+          if (err) return res.status(500).json({ message: 'Error al modificar las categorías en la base de datos.' });
           res.status(200).json({ message: `Categoría actualizada: '${oldName}' → '${newName}'` });
         });
       });
     });
   } catch (error) {
-    logger.error('Error en /api/servicios/categorias/:oldName (PUT):', error);
     res.status(500).json({ message: 'Error en el servidor.' });
   }
 });
+
 //eliminar un servicio
 router.delete('/categorias/:name', async (req, res) => {
   const { name } = req.params;
 
   try {
-    // Verificar si algún servicio usa la categoría
+    // 1️⃣ Verificar si algún servicio usa la categoría
     const sqlCheck = `SELECT id, title FROM servicios WHERE category = ?`;
     db.query(sqlCheck, [name], (err, services) => {
-      if (err) {
-        logger.error('Error al verificar servicios con esta categoría:', err);
-        return res.status(500).json({ message: 'Error al verificar servicios.' });
-      }
+      if (err) return res.status(500).json({ message: 'Error al verificar servicios.' });
 
       if (services.length > 0) {
         const serviceNames = services.map(s => s.title).join(', ');
@@ -412,14 +396,19 @@ router.delete('/categorias/:name', async (req, res) => {
         });
       }
 
-      // Si no hay servicios usándola, eliminar del ENUM
+      // 2️⃣ Obtener el ENUM actualizado sin la categoría eliminada
       const sqlEnum = `SHOW COLUMNS FROM servicios LIKE 'category'`;
       db.query(sqlEnum, (err, result) => {
         if (err) return res.status(500).json({ message: 'Error al obtener categorías.' });
 
         const enumValues = result[0].Type.match(/'([^']+)'/g).map(val => val.replace(/'/g, ''));
-        const newEnumValues = enumValues.filter(val => val !== `'${name}'`).join(',');
+        const newEnumValues = enumValues.filter(val => val !== name).map(v => `'${v}'`).join(',');
 
+        if (newEnumValues.length === 0) {
+          return res.status(400).json({ message: 'No puedes eliminar todas las categorías del ENUM.' });
+        }
+
+        // 3️⃣ Modificar la estructura del ENUM
         const sqlAlter = `ALTER TABLE servicios MODIFY COLUMN category ENUM(${newEnumValues}) NOT NULL`;
         db.query(sqlAlter, (err) => {
           if (err) return res.status(500).json({ message: 'Error al eliminar categoría.' });
@@ -428,10 +417,10 @@ router.delete('/categorias/:name', async (req, res) => {
       });
     });
   } catch (error) {
-    logger.error('Error en /api/servicios/categorias/:name (DELETE):', error);
     res.status(500).json({ message: 'Error en el servidor.' });
   }
 });
+
 
 
 module.exports = router;
