@@ -213,5 +213,89 @@ router.get('/categorias', async (req, res) => {
   }
 });
 
+router.post('/create', async (req, res) => {
+  let { title, description, category, duration, price, benefits, includes, preparation, aftercare } = req.body;
+
+  // Expresión regular para evitar caracteres especiales peligrosos (excepto tildes y comas)
+  const regexValidText = /^[a-zA-ZÁÉÍÓÚáéíóúñÑ0-9.,\s-]+$/;
+
+  // Validaciones generales
+  if (!title || !description || !category || !duration || !price) {
+      return res.status(400).json({ message: 'Todos los campos son obligatorios.' });
+  }
+  if (!regexValidText.test(title) || !regexValidText.test(description) || !regexValidText.test(category)) {
+      return res.status(400).json({ message: 'Los campos no pueden contener caracteres especiales.' });
+  }
+  if (isNaN(price) || price <= 0) {
+      return res.status(400).json({ message: 'El precio debe ser un número mayor a 0.' });
+  }
+  if (!/^\d+-\d+ minutos$/.test(duration)) {
+      return res.status(400).json({ message: 'La duración debe estar en formato "X-Y minutos".' });
+  }
+
+  try {
+      // Verificar si la categoría existe en la BDD
+      const categoryCheckQuery = `SHOW COLUMNS FROM servicios LIKE 'category'`;
+      db.query(categoryCheckQuery, (err, result) => {
+          if (err) {
+              console.error('❌ Error al verificar la categoría:', err);
+              return res.status(500).json({ message: 'Error al validar la categoría.' });
+          }
+
+          const enumValues = result[0].Type.match(/'([^']+)'/g).map(val => val.replace(/'/g, ''));
+          if (!enumValues.includes(category)) {
+              return res.status(400).json({ message: `La categoría '${category}' no es válida.` });
+          }
+
+          // Insertar el servicio en la tabla "servicios"
+          const insertServiceQuery = 'INSERT INTO servicios (title, description, category, duration, price) VALUES (?, ?, ?, ?, ?)';
+          db.query(insertServiceQuery, [title, description, category, duration, price], (err, result) => {
+              if (err) {
+                  console.error('❌ Error al insertar servicio:', err);
+                  return res.status(500).json({ message: 'Error al registrar el servicio.' });
+              }
+
+              const servicio_id = result.insertId; // Obtener ID del servicio recién creado
+
+              // Validar arrays antes de insertar detalles
+              const detallesValues = [];
+
+              const validateArray = (arr, tipo) => {
+                  if (Array.isArray(arr)) {
+                      arr.forEach(item => {
+                          if (typeof item === 'string' && item.trim() !== '') {
+                              detallesValues.push([servicio_id, tipo, item.trim()]);
+                          }
+                      });
+                  }
+              };
+
+              validateArray(benefits, 'beneficio');
+              validateArray(includes, 'incluye');
+              validateArray(preparation, 'preparacion');
+              validateArray(aftercare, 'cuidado');
+
+              if (detallesValues.length === 0) {
+                  return res.status(201).json({ message: 'Servicio creado correctamente.', servicio_id });
+              }
+
+              //  Insertar detalles en "servicio_detalles"
+              const insertDetailsQuery = 'INSERT INTO servicio_detalles (servicio_id, tipo, descripcion) VALUES ?';
+              db.query(insertDetailsQuery, [detallesValues], (err) => {
+                  if (err) {
+                      console.error('❌ Error al insertar detalles:', err);
+                      return res.status(500).json({ message: 'Error al registrar los detalles del servicio.' });
+                  }
+
+                  res.status(201).json({ message: 'Servicio y detalles creados correctamente.', servicio_id });
+              });
+          });
+      });
+  } catch (error) {
+      console.error('❌ Error en el servidor:', error);
+      res.status(500).json({ message: 'Error en el servidor.' });
+  }
+});
+
 
 module.exports = router;
