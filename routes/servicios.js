@@ -387,36 +387,43 @@ router.delete('/categorias/:name', async (req, res) => {
     // 1️⃣ Verificar si algún servicio usa la categoría
     const sqlCheck = `SELECT id, title FROM servicios WHERE category = ?`;
     db.query(sqlCheck, [name], (err, services) => {
-      if (err) return res.status(500).json({ message: 'Error al verificar servicios.' });
+      if (err) {
+        logger.error('Error al verificar servicios con esta categoría:', err);
+        return res.status(500).json({ message: 'Error al verificar servicios.' });
+      }
 
       if (services.length > 0) {
         const serviceNames = services.map(s => s.title).join(', ');
         return res.status(400).json({
-          message: `No se puede eliminar la categoría '${name}' porque está en uso en los siguientes servicios: ${serviceNames}.`
+          message: `❌ No se puede eliminar la categoría '${name}' porque está en uso en: ${serviceNames}.`
         });
       }
 
-      // 2️⃣ Obtener el ENUM actualizado sin la categoría eliminada
+      // 2️⃣ Obtener categorías actuales
       const sqlEnum = `SHOW COLUMNS FROM servicios LIKE 'category'`;
       db.query(sqlEnum, (err, result) => {
-        if (err) return res.status(500).json({ message: 'Error al obtener categorías.' });
+        if (err || !result || result.length === 0) {
+          return res.status(500).json({ message: 'Error al obtener las categorías.' });
+        }
 
+        // 3️⃣ Filtrar la categoría a eliminar
         const enumValues = result[0].Type.match(/'([^']+)'/g).map(val => val.replace(/'/g, ''));
         const newEnumValues = enumValues.filter(val => val !== name).map(v => `'${v}'`).join(',');
 
-        if (newEnumValues.length === 0) {
-          return res.status(400).json({ message: 'No puedes eliminar todas las categorías del ENUM.' });
-        }
-
-        // 3️⃣ Modificar la estructura del ENUM
+        // 4️⃣ Modificar el ENUM en la tabla
         const sqlAlter = `ALTER TABLE servicios MODIFY COLUMN category ENUM(${newEnumValues}) NOT NULL`;
         db.query(sqlAlter, (err) => {
-          if (err) return res.status(500).json({ message: 'Error al eliminar categoría.' });
-          res.status(200).json({ message: `Categoría '${name}' eliminada.` });
+          if (err) {
+            logger.error('Error al modificar ENUM de categorías:', err);
+            return res.status(500).json({ message: 'Error al eliminar la categoría.' });
+          }
+
+          res.status(200).json({ message: `✅ Categoría '${name}' eliminada correctamente.` });
         });
       });
     });
   } catch (error) {
+    logger.error('Error en /api/servicios/categorias/:name (DELETE):', error);
     res.status(500).json({ message: 'Error en el servidor.' });
   }
 });
