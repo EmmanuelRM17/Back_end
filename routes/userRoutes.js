@@ -277,7 +277,7 @@ async function autenticarUsuario(
       db.query(updateTokenSql, [sessionToken, usuario.id], (err) => {
         if (err) return res.status(500).json({ message: 'Error en el servidor.' });
 
-        // Configuración mejorada de la cookie
+        // Configuración de la cookie
         res.cookie('carolDental', sessionToken, {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production', // true en producción (HTTPS)
