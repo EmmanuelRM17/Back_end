@@ -16,8 +16,8 @@ class MySQLTransport extends TransportStream {
   log(info, callback) {
     setImmediate(() => this.emit('logged', info));
 
-    const sqlInsert = 'INSERT INTO logs (level, message, timestamp) VALUES (?, ?, ?)';
-    const sqlDelete = 'DELETE FROM logs WHERE id IN (SELECT id FROM logs ORDER BY timestamp ASC LIMIT ?)';
+    const sqlInsert = 'INSERT INTO inf_logs (level, message, timestamp) VALUES (?, ?, ?)';
+    const sqlDelete = 'DELETE FROM inf_logs WHERE id IN (SELECT id FROM logs ORDER BY timestamp ASC LIMIT ?)';
 
     // Inserta el log en la base de datos
     db.query(sqlInsert, [info.level, info.message, new Date()], (err) => {
