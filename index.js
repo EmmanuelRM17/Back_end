@@ -48,6 +48,7 @@ app.use(express.json());
 const userRoutes = require("./routes/userRoutes");
 const Registrer = require("./routes/registrer");
 const Citas = require("./routes/admin/citas")
+
 const politicasRoutes = require("./routes/admin/inf/inf_politicasRoutes");
 const deslindeRoutes = require("./routes/admin/inf/inf_deslindelegal");
 const terminosRoutes = require("./routes/admin/inf/inf_terminosYcondicion");
@@ -58,6 +59,7 @@ const reportes = require("./routes/admin/inf/inf_reportes");
 const preguntas = require("./routes/admin/preguntas");
 const contactanos = require("./routes/admin/contact");
 const expediente = require("./routes/empleado/expedientClinic");
+const Empleados = require("./routes/empleado/empleados")
 
 //pacientes
 const p_perfil = require("./routes/pacientes/perfil")
@@ -67,6 +69,7 @@ app.use("/api", Registrer);
 app.use("/api/users", userRoutes);
 app.use("/api/citas", Citas)
 //administrador
+
 app.use("/api/politicas", politicasRoutes);
 app.use("/api/deslinde", deslindeRoutes);
 app.use("/api/termiCondicion", terminosRoutes);
@@ -78,8 +81,9 @@ app.use("/api/preguntas", preguntas);
 app.use("/api/contacto",contactanos)
 
 
-//empleadooos
-app.use("/api/expediente",expediente);
+//empleados
+app.use("/api/expediente", expediente);
+app.use("/api/empleados", Empleados);
 
 //pacientes
 app.use("/api/profile", p_perfil);

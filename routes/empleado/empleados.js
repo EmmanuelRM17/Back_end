@@ -6,7 +6,7 @@ const router = express.Router();
 const logger = require('../../utils/logger');
 
 // Obtener odontólogos activos con su imagen de perfil
-router.get('/activos', async (req, res) => {
+router.get('/odontologos/activos', async (req, res) => {
     try {
         const sql = `
             SELECT id, nombre, aPaterno, aMaterno, email, puesto, estado, imagen
