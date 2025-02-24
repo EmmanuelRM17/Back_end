@@ -33,7 +33,7 @@ router.post('/nueva', async (req, res) => {
 
     try {
         const formattedFechaHora = new Date(fecha_hora).toISOString().slice(0, 19).replace('T', ' ');
-
+        const formattedFechaSolicitud = new Date().toISOString().slice(0, 19).replace('T', ' ');
         // Verificar si ya existe una cita en la misma fecha y hora con el mismo odontólogo
         const checkQuery = `
             SELECT COUNT(*) as count FROM citas 
@@ -54,8 +54,8 @@ router.post('/nueva', async (req, res) => {
                 INSERT INTO citas (
                     paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
                     correo, telefono, odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
-                    categoria_servicio, precio_servicio, fecha_hora, estado, notas, horario_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    categoria_servicio, precio_servicio, fecha_consulta, fecha_solicitud, estado, notas, horario_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             `;
 
             const values = [
@@ -74,6 +74,7 @@ router.post('/nueva', async (req, res) => {
                 categoria_servicio ? xss(categoria_servicio) : null,
                 precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00,
                 formattedFechaHora,
+                formattedFechaSolicitud,
                 xss(estado) || 'Pendiente',
                 notas ? xss(notas) : null,
                 horario_id ? parseInt(xss(horario_id)) : null
