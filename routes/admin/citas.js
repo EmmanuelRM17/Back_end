@@ -43,7 +43,7 @@ router.post('/nueva', async (req, res) => {
         `;
 
         const values = [
-            paciente_id ? parseInt(xss(paciente_id)) : 0, // Asigna 0 en lugar de null
+            paciente_id ? parseInt(xss(paciente_id)) : null, 
             xss(nombre),
             xss(apellido_paterno),
             xss(apellido_materno),
