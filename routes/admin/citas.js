@@ -49,7 +49,7 @@ router.post('/nueva', async (req, res) => {
                 return res.status(400).json({ message: 'Ya existe una cita programada para este odontólogo en la misma fecha y hora.' });
             }
 
-            // Si no hay citas duplicadas, proceder con la inserción
+            // Si no hay citas duplicadas
             const insertQuery = `
                 INSERT INTO citas (
                     paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
