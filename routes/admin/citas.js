@@ -32,6 +32,8 @@ router.post('/nueva', async (req, res) => {
     }
 
     try {
+        const formattedFechaHora = new Date(fecha_hora).toISOString().slice(0, 19).replace('T', ' ');
+
         const insertQuery = `
             INSERT INTO citas (
                 paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
@@ -47,15 +49,15 @@ router.post('/nueva', async (req, res) => {
             xss(apellido_materno),
             xss(genero),
             xss(fecha_nacimiento),
-            correo ? xss(correo) : null, 
-            telefono ? xss(telefono) : null, 
+            correo ? xss(correo) : '', 
+            telefono ? xss(telefono) : '', 
             odontologo_id ? parseInt(xss(odontologo_id)) : null,
             xss(odontologo_nombre),
             parseInt(xss(servicio_id)),
             xss(servicio_nombre),
             categoria_servicio ? xss(categoria_servicio) : null, 
             precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00, 
-            xss(fecha_hora),
+            formattedFechaHora,
             xss(estado) || 'Pendiente',
             notas ? xss(notas) : null,
             horario_id ? parseInt(xss(horario_id)) : null
