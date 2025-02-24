@@ -34,43 +34,59 @@ router.post('/nueva', async (req, res) => {
     try {
         const formattedFechaHora = new Date(fecha_hora).toISOString().slice(0, 19).replace('T', ' ');
 
-        const insertQuery = `
-            INSERT INTO citas (
-                paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
-                correo, telefono, odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
-                categoria_servicio, precio_servicio, fecha_hora, estado, notas, horario_id
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        // Verificar si ya existe una cita en la misma fecha y hora con el mismo odontólogo
+        const checkQuery = `
+            SELECT COUNT(*) as count FROM citas 
+            WHERE fecha_hora = ? AND odontologo_id = ?
         `;
-
-        const values = [
-            paciente_id ? parseInt(xss(paciente_id)) : null, 
-            xss(nombre),
-            xss(apellido_paterno),
-            xss(apellido_materno),
-            xss(genero),
-            xss(fecha_nacimiento),
-            correo ? xss(correo) : '',
-            telefono ? xss(telefono) : '',
-            odontologo_id ? parseInt(xss(odontologo_id)) : null,
-            xss(odontologo_nombre),
-            parseInt(xss(servicio_id)),
-            xss(servicio_nombre),
-            categoria_servicio ? xss(categoria_servicio) : null,
-            precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00,
-            formattedFechaHora,
-            xss(estado) || 'Pendiente',
-            notas ? xss(notas) : null,
-            horario_id ? parseInt(xss(horario_id)) : null
-        ];
-
-
-        db.query(insertQuery, values, (err, result) => {
+        db.query(checkQuery, [formattedFechaHora, odontologo_id], (err, result) => {
             if (err) {
-                logger.error('Error al insertar cita: ', err);
-                return res.status(500).json({ message: 'Error al registrar la cita.' });
+                logger.error('Error al verificar citas duplicadas: ', err);
+                return res.status(500).json({ message: 'Error al verificar disponibilidad de citas.' });
             }
 
-            res.status(201).json({ message: 'Cita creada correctamente.', cita_id: result.insertId });
+            if (result[0].count > 0) {
+                return res.status(400).json({ message: 'Ya existe una cita programada para este odontólogo en la misma fecha y hora.' });
+            }
+
+            // Si no hay citas duplicadas, proceder con la inserción
+            const insertQuery = `
+                INSERT INTO citas (
+                    paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
+                    correo, telefono, odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
+                    categoria_servicio, precio_servicio, fecha_hora, estado, notas, horario_id
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            `;
+
+            const values = [
+                paciente_id ? parseInt(xss(paciente_id)) : null, 
+                xss(nombre),
+                xss(apellido_paterno),
+                xss(apellido_materno),
+                xss(genero),
+                xss(fecha_nacimiento),
+                correo ? xss(correo) : '',
+                telefono ? xss(telefono) : '',
+                odontologo_id ? parseInt(xss(odontologo_id)) : null,
+                xss(odontologo_nombre),
+                parseInt(xss(servicio_id)),
+                xss(servicio_nombre),
+                categoria_servicio ? xss(categoria_servicio) : null,
+                precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00,
+                formattedFechaHora,
+                xss(estado) || 'Pendiente',
+                notas ? xss(notas) : null,
+                horario_id ? parseInt(xss(horario_id)) : null
+            ];
+
+            db.query(insertQuery, values, (err, result) => {
+                if (err) {
+                    logger.error('Error al insertar cita: ', err);
+                    return res.status(500).json({ message: 'Error al registrar la cita.' });
+                }
+
+                res.status(201).json({ message: 'Cita creada correctamente.', cita_id: result.insertId });
+            });
         });
 
     } catch (error) {
