@@ -43,25 +43,26 @@ router.post('/nueva', async (req, res) => {
         `;
 
         const values = [
-            paciente_id ? parseInt(xss(paciente_id)) : null, 
+            paciente_id ? parseInt(xss(paciente_id)) : 0, // Asigna 0 en lugar de null
             xss(nombre),
             xss(apellido_paterno),
             xss(apellido_materno),
             xss(genero),
             xss(fecha_nacimiento),
-            correo ? xss(correo) : '', 
-            telefono ? xss(telefono) : '', 
+            correo ? xss(correo) : '',
+            telefono ? xss(telefono) : '',
             odontologo_id ? parseInt(xss(odontologo_id)) : null,
             xss(odontologo_nombre),
             parseInt(xss(servicio_id)),
             xss(servicio_nombre),
-            categoria_servicio ? xss(categoria_servicio) : null, 
-            precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00, 
+            categoria_servicio ? xss(categoria_servicio) : null,
+            precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00,
             formattedFechaHora,
             xss(estado) || 'Pendiente',
             notas ? xss(notas) : null,
             horario_id ? parseInt(xss(horario_id)) : null
         ];
+
 
         db.query(insertQuery, values, (err, result) => {
             if (err) {
