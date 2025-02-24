@@ -20,26 +20,27 @@ router.post('/nueva', async (req, res) => {
         servicio_nombre,
         categoria_servicio,
         precio_servicio,
-        fecha_hora,
+        fecha_consulta,
         estado,
         notas,
         horario_id
     } = req.body;
 
     // Validaciones básicas con nombres correctos
-    if (!nombre || !apellido_paterno || !apellido_materno || !genero || !fecha_nacimiento || !servicio_id || !fecha_hora) {
+    if (!nombre || !apellido_paterno || !apellido_materno || !genero || !fecha_nacimiento || !servicio_id || !fecha_consulta) {
         return res.status(400).json({ message: 'Los campos obligatorios no están completos.' });
     }
 
     try {
-        const formattedFechaHora = new Date(fecha_hora).toISOString().slice(0, 19).replace('T', ' ');
+        const formattedFechaConsulta = new Date(fecha_consulta).toISOString().slice(0, 19).replace('T', ' ');
+        const formattedFechaSolicitud = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
         // Verificar si ya existe una cita en la misma fecha y hora con el mismo odontólogo
         const checkQuery = `
             SELECT COUNT(*) as count FROM citas 
-            WHERE fecha_hora = ? AND odontologo_id = ?
+            WHERE fecha_consulta = ? AND odontologo_id = ?
         `;
-        db.query(checkQuery, [formattedFechaHora, odontologo_id], (err, result) => {
+        db.query(checkQuery, [formattedFechaConsulta, odontologo_id], (err, result) => {
             if (err) {
                 logger.error('Error al verificar citas duplicadas: ', err);
                 return res.status(500).json({ message: 'Error al verificar disponibilidad de citas.' });
@@ -51,15 +52,15 @@ router.post('/nueva', async (req, res) => {
 
             // Si no hay citas duplicadas, proceder con la inserción
             const insertQuery = `
-                INSERT INTO citas (
-                    paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
-                    correo, telefono, odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
-                    categoria_servicio, precio_servicio, fecha_hora, estado, notas, horario_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            `;
+            INSERT INTO citas (
+                paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
+                correo, telefono, odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
+                categoria_servicio, precio_servicio, fecha_consulta, fecha_solicitud, estado, notas, horario_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
 
             const values = [
-                paciente_id ? parseInt(xss(paciente_id)) : null, 
+                paciente_id ? parseInt(xss(paciente_id)) : null,
                 xss(nombre),
                 xss(apellido_paterno),
                 xss(apellido_materno),
@@ -73,11 +74,13 @@ router.post('/nueva', async (req, res) => {
                 xss(servicio_nombre),
                 categoria_servicio ? xss(categoria_servicio) : null,
                 precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00,
-                formattedFechaHora,
+                xss(fecha_consulta), // Cambiado
+                new Date().toISOString().slice(0, 19).replace('T', ' '), // fecha_solicitud
                 xss(estado) || 'Pendiente',
                 notas ? xss(notas) : null,
                 horario_id ? parseInt(xss(horario_id)) : null
             ];
+
 
             db.query(insertQuery, values, (err, result) => {
                 if (err) {
