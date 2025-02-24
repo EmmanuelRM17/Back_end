@@ -27,13 +27,14 @@ router.get('/disponibilidad', async (req, res) => {
         const diaSemana = daysMap[new Date(fecha).getDay()];
 
         const sql = `
-            SELECT h.id AS horario_id, h.hora_inicio, h.hora_fin, h.duracion
+           SELECT h.id AS horario_id, h.hora_inicio, h.hora_fin, h.duracion
             FROM horarios h
-            LEFT JOIN citas c ON c.horario_id = h.id AND DATE(c.fecha_hora) = ?
+            LEFT JOIN citas c ON c.horario_id = h.id AND DATE(c.fecha_consulta) = ?
             WHERE h.empleado_id = ? 
             AND h.dia_semana = ?
             AND (c.id IS NULL OR c.estado IN ('Cancelada', 'Completada'))
             ORDER BY h.hora_inicio;
+
         `;
 
         db.query(sql, [fecha, odontologo_id, diaSemana], (err, result) => {
