@@ -3,6 +3,17 @@ const db = require('../../db');
 const router = express.Router();
 const logger = require('../../utils/logger');
 
+// Mapeo correcto de días de la semana
+const daysMap = {
+    0: 'Domingo',
+    1: 'Lunes',
+    2: 'Martes',
+    3: 'Miércoles',
+    4: 'Jueves',
+    5: 'Viernes',
+    6: 'Sábado'
+};
+
 // Obtener horarios disponibles para un odontólogo en una fecha específica
 router.get('/disponibilidad', async (req, res) => {
     const { odontologo_id, fecha } = req.query;
@@ -12,14 +23,15 @@ router.get('/disponibilidad', async (req, res) => {
     }
 
     try {
-        const diaSemana = new Date(fecha).toLocaleString('es-ES', { weekday: 'long' }).toLowerCase();
+        // Convertir la fecha a día de la semana con el formato correcto
+        const diaSemana = daysMap[new Date(fecha).getDay()];
 
         const sql = `
             SELECT h.id AS horario_id, h.hora_inicio, h.hora_fin, h.duracion
             FROM horarios h
             LEFT JOIN citas c ON c.horario_id = h.id AND DATE(c.fecha_hora) = ?
             WHERE h.empleado_id = ? 
-            AND LOWER(h.dia_semana) = ?
+            AND h.dia_semana = ?
             AND (c.id IS NULL OR c.estado IN ('Cancelada', 'Completada'))
             ORDER BY h.hora_inicio;
         `;
@@ -42,7 +54,7 @@ router.get('/disponibilidad', async (req, res) => {
     }
 });
 
-// Nueva ruta: Obtener los días laborales dinámicamente para un odontólogo
+// Obtener los días laborales dinámicamente para un odontólogo
 router.get('/dias_laborales', async (req, res) => {
     const { odontologo_id } = req.query;
 
