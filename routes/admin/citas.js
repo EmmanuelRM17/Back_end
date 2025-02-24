@@ -1,9 +1,7 @@
-// rutas/citas.js
-
 const express = require('express');
-const db = require('../db');
+const db = require('../../db');
 const router = express.Router();
-const logger = require('../utils/logger');
+const logger = require('../../utils/logger');
 const xss = require('xss'); // Para sanitización de entradas
 
 router.post('/nueva', async (req, res) => {
