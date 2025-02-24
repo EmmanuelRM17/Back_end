@@ -27,7 +27,7 @@ class MySQLTransport extends TransportStream {
       }
 
       // Contar el número de registros y eliminar los más antiguos si supera el límite
-      const countQuery = 'SELECT COUNT(*) AS count FROM logs';
+      const countQuery = 'SELECT COUNT(*) AS count FROM inf_logs';
       db.query(countQuery, (err, results) => {
         if (err) {
           console.error('Error al contar los registros de logs:', err);
