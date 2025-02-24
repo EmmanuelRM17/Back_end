@@ -37,7 +37,7 @@ router.post('/nueva', async (req, res) => {
         // Verificar si ya existe una cita en la misma fecha y hora con el mismo odontólogo
         const checkQuery = `
             SELECT COUNT(*) as count FROM citas 
-            WHERE fecha_hora = ? AND odontologo_id = ?
+            WHERE fecha_consulta = ? AND odontologo_id = ?
         `;
         db.query(checkQuery, [formattedFechaHora, odontologo_id], (err, result) => {
             if (err) {
