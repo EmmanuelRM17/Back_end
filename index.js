@@ -47,7 +47,7 @@ app.use(express.json());
 // Tus rutas existentes
 const userRoutes = require("./routes/userRoutes");
 const Registrer = require("./routes/registrer");
-
+const Citas = require("./routes/admin/citas")
 const politicasRoutes = require("./routes/admin/inf/inf_politicasRoutes");
 const deslindeRoutes = require("./routes/admin/inf/inf_deslindelegal");
 const terminosRoutes = require("./routes/admin/inf/inf_terminosYcondicion");
@@ -61,10 +61,11 @@ const expediente = require("./routes/empleado/expedientClinic");
 
 //pacientes
 const p_perfil = require("./routes/pacientes/perfil")
+
 // Asignar rutas
 app.use("/api", Registrer);
 app.use("/api/users", userRoutes);
-
+app.use("/api/citas", Citas)
 //administrador
 app.use("/api/politicas", politicasRoutes);
 app.use("/api/deslinde", deslindeRoutes);
