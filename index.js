@@ -59,7 +59,9 @@ const reportes = require("./routes/admin/inf/inf_reportes");
 const preguntas = require("./routes/admin/preguntas");
 const contactanos = require("./routes/admin/contact");
 const expediente = require("./routes/empleado/expedientClinic");
-const Empleados = require("./routes/empleado/empleados")
+const Empleados = require("./routes/empleado/empleados");
+const Horarios = require("./routes/empleado/horarios")
+
 
 //pacientes
 const p_perfil = require("./routes/pacientes/perfil")
@@ -78,12 +80,13 @@ app.use("/api/redesSociales", redes);
 app.use("/api/reportes", reportes);
 app.use("/api/servicios", servicios)
 app.use("/api/preguntas", preguntas);
-app.use("/api/contacto",contactanos)
+app.use("/api/contacto",contactanos);
 
 
 //empleados
 app.use("/api/expediente", expediente);
 app.use("/api/empleados", Empleados);
+app.use("/api/horarios", Horarios);
 
 //pacientes
 app.use("/api/profile", p_perfil);
