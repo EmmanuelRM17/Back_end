@@ -194,7 +194,6 @@ router.delete('/delete/:id', async (req, res) => {
   });
 });
 
-
 router.post('/create', async (req, res) => {
   let { title, description, category, duration, price, benefits, includes, preparation, aftercare } = req.body;
 
@@ -278,7 +277,6 @@ router.post('/create', async (req, res) => {
       res.status(500).json({ message: 'Error en el servidor.' });
   }
 });
-
 
 // Obtener todas las categorías de los servicios (sin duplicados)
 router.get('/categorias', async (req, res) => {
@@ -462,5 +460,13 @@ router.delete('/categorias/:name', async (req, res) => {
   }
 });
 
-
+router.get('/noticias', async (req, res) => {
+  try {
+    const [rows] = await pool.query('SELECT * FROM noticias_consejos');
+    res.json(rows); // Devuelve el array con todos los registros
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Error al obtener las noticias de la base de datos' });
+  }
+});
 module.exports = router;
