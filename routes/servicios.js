@@ -460,13 +460,20 @@ router.delete('/categorias/:name', async (req, res) => {
   }
 });
 
+// Endpoint para obtener todas las noticias
 router.get('/noticias', async (req, res) => {
   try {
-    const [rows] = await pool.query('SELECT * FROM noticias_consejos');
-    res.json(rows); // Devuelve el array con todos los registros
+    db.query('SELECT * FROM noticias_consejos', (err, rows) => {
+      if (err) {
+        logger.error('Error al obtener las noticias de la base de datos:', err);
+        return res.status(500).json({ error: 'Error al obtener las noticias de la base de datos' });
+      }
+      res.status(200).json(rows);
+    });
   } catch (error) {
-    console.error(error);
+    logger.error('Error en /noticias (catch):', error);
     res.status(500).json({ error: 'Error al obtener las noticias de la base de datos' });
   }
 });
+
 module.exports = router;
