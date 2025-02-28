@@ -95,6 +95,7 @@ router.post('/nueva', async (req, res) => {
         res.status(500).json({ message: 'Error en el servidor.' });
     }
 });
+
 router.get('/pacientes/exists', async (req, res) => {
     const { email } = req.query;
 
