@@ -128,7 +128,7 @@ router.get('/pacientes/exists', async (req, res) => {
     }
 });
 
-router.get("/citas/all", async (req, res) => {
+router.get("/all", async (req, res) => {
   try {
     const query = `
        SELECT 
