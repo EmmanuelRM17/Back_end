@@ -127,4 +127,50 @@ router.get('/pacientes/exists', async (req, res) => {
         res.status(500).json({ message: 'Error en el servidor.' });
     }
 });
+
+router.get("/citas/all", async (req, res) => {
+  try {
+    const query = `
+       SELECT 
+        c.id AS consulta_id,
+        c.paciente_id,
+        c.nombre AS paciente_nombre,
+        c.apellido_paterno AS paciente_apellido_paterno,
+        c.apellido_materno AS paciente_apellido_materno,
+        c.genero AS paciente_genero,
+        c.fecha_nacimiento AS paciente_fecha_nacimiento,
+        c.correo AS paciente_correo,
+        c.telefono AS paciente_telefono,
+        
+        c.odontologo_id,
+        CONCAT(e.nombre, ' ', e.aPaterno, ' ', e.aMaterno) AS odontologo_nombre, -- Empleados como odontólogos
+        
+        c.servicio_id,
+        s.title AS servicio_nombre,
+        s.category AS categoria_servicio, -- Obtener la categoría del servicio
+        s.price AS precio_servicio, -- Obtener el precio del servicio
+        
+        c.fecha_consulta,
+        c.estado,
+        c.notas,
+        c.horario_id,
+        c.fecha_solicitud
+      FROM citas c
+      LEFT JOIN pacientes p ON c.paciente_id = p.id
+      LEFT JOIN servicios s ON c.servicio_id = s.id
+      LEFT JOIN empleados e ON c.odontologo_id = e.id -- Relación con odontólogos (empleados)
+      ORDER BY c.fecha_consulta DESC;
+    `;
+
+    // Ejecutar consulta con async/await
+    const [results] = await db.promise().query(query);
+
+    res.json(results);
+  } catch (error) {
+    console.error("Error al obtener citas:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+});
+
+
 module.exports = router;
