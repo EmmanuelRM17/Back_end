@@ -172,5 +172,70 @@ router.get("/all", async (req, res) => {
   }
 });
 
+router.put('/update/:id', async (req, res) => {
+    const { id } = req.params; // Obtener el ID de la cita desde la URL
+    const {
+        servicio_id,
+        categoria_servicio,
+        precio_servicio,
+        fecha_consulta,
+        estado,
+        notas
+    } = req.body;
+
+    // 🛑 Validaciones básicas
+    if (!id || isNaN(id)) {
+        return res.status(400).json({ message: 'ID de cita inválido.' });
+    }
+    if (!servicio_id || isNaN(servicio_id)) {
+        return res.status(400).json({ message: 'El servicio es obligatorio y debe ser un número.' });
+    }
+    if (!fecha_consulta || isNaN(new Date(fecha_consulta).getTime())) {
+        return res.status(400).json({ message: 'Fecha de consulta inválida.' });
+    }
+    if (!['Pendiente', 'Confirmada', 'Cancelada', 'Completada'].includes(estado)) {
+        return res.status(400).json({ message: 'Estado de cita inválido.' });
+    }
+
+    try {
+        const updateQuery = `
+            UPDATE citas
+            SET 
+                servicio_id = ?, 
+                categoria_servicio = ?, 
+                precio_servicio = ?, 
+                fecha_consulta = ?, 
+                estado = ?, 
+                notas = ?
+            WHERE id = ?
+        `;
+
+        const values = [
+            parseInt(servicio_id),
+            xss(categoria_servicio),
+            parseFloat(precio_servicio),
+            new Date(fecha_consulta), // Se asegura de que el formato sea datetime
+            xss(estado),
+            xss(notas) || null,
+            parseInt(id)
+        ];
+
+        db.query(updateQuery, values, (err, result) => {
+            if (err) {
+                logger.error('Error al actualizar la cita:', err);
+                return res.status(500).json({ message: 'Error al actualizar la cita en la base de datos.' });
+            }
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ message: 'No se encontró la cita con el ID proporcionado.' });
+            }
+
+            res.json({ message: 'Cita actualizada correctamente.' });
+        });
+    } catch (error) {
+        logger.error('Error en la actualización de cita:', error);
+        res.status(500).json({ message: 'Error interno del servidor.' });
+    }
+});
 
 module.exports = router;
