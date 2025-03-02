@@ -61,7 +61,7 @@ const contactanos = require("./routes/admin/contact");
 const expediente = require("./routes/empleado/expedientClinic");
 const Empleados = require("./routes/empleado/empleados");
 const Horarios = require("./routes/empleado/horarios")
-
+const CalendarioCitas = require("./routes/admin/inf/calendarioCitas")
 
 //pacientes
 const p_perfil = require("./routes/pacientes/perfil")
@@ -81,7 +81,7 @@ app.use("/api/reportes", reportes);
 app.use("/api/servicios", servicios)
 app.use("/api/preguntas", preguntas);
 app.use("/api/contacto",contactanos);
-
+app.use("/api/calendario",CalendarioCitas);
 
 //empleados
 app.use("/api/expediente", expediente);
