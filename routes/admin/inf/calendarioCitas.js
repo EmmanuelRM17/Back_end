@@ -8,9 +8,9 @@ router.get('/agenda', async (req, res) => {
     // Consulta SQL ajustada para obtener fecha de consulta, duración y nombre del servicio
     const query = `
       SELECT
-        c.fecha_consulta,    -- Fecha de la consulta
-        s.duration,          -- Duración del servicio en minutos
-        c.servicio_nombre    -- Nombre del servicio
+        c.fecha_consulta,   
+        s.duration,        
+        c.servicio_nombre   
       FROM citas c
       JOIN servicios s ON c.servicio_id = s.id;
     `;
