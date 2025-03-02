@@ -16,8 +16,17 @@ router.get('/agenda', async (req, res) => {
     `;
     const result = await db.query(query);
 
+    // Log para ver el resultado de la consulta
+    console.log('Resultado de la consulta:', result.rows);
+
+    // Si la consulta no devuelve datos
+    if (!result.rows || result.rows.length === 0) {
+      return res.status(404).json({ error: 'No se encontraron eventos' });
+    }
+
     // Formatear los datos para el calendario
     const events = result.rows.map(row => {
+      console.log('Procesando evento:', row);
       const startDate = new Date(row.fecha_consulta); // Fecha y hora de inicio
 
       // Calcular la hora de fin agregando la duración (en minutos) al inicio
