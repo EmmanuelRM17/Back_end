@@ -3,6 +3,7 @@ const db = require('../../db');
 const router = express.Router();
 const logger = require('../../utils/logger');
 const xss = require('xss'); // Para sanitización de entradas
+const moment = require('moment-timezone');
 
 router.post('/nueva', async (req, res) => {
     const {
@@ -244,6 +245,8 @@ router.delete('/delete/:id', async (req, res) => {
     try {
         // Obtener los datos de la cita antes de "eliminarla"
         const selectQuery = `SELECT * FROM citas WHERE id = ?`;
+        const fechaRegistro = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
+
         db.query(selectQuery, [id], (err, results) => {
             if (err) {
                 logger.error('Error al obtener la cita:', err);
@@ -258,16 +261,18 @@ router.delete('/delete/:id', async (req, res) => {
 
             // Insertar la cita en el historial médico
             const insertHistorialQuery = `
-                INSERT INTO historial_medico (paciente_id, cita_id, enfermedades_previas, tratamientos_recientes)
-                VALUES (?, ?, ?, ?)
-            `;
+            INSERT INTO historial_medico (paciente_id, cita_id, fecha_registro, enfermedades_previas, tratamientos_recientes)
+            VALUES (?, ?, ?, ?, ?)
+        `;
 
-            const valuesHistorial = [
-                cita.paciente_id,
-                cita.id,
-                'N/A', // Aquí puedes agregar lógica para enfermedades previas
-                'N/A'  // Aquí puedes agregar lógica para tratamientos recientes
-            ];
+        const valuesHistorial = [
+            cita.paciente_id,
+            cita.id,
+            fechaRegistro, // 🟢 Guardamos la fecha con la zona horaria correcta
+            'N/A',
+            'N/A'
+        ];
+        
 
             db.query(insertHistorialQuery, valuesHistorial, (err) => {
                 if (err) {
