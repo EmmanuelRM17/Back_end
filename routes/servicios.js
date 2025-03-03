@@ -32,7 +32,7 @@ router.get('/get/:id', async (req, res) => {
 
   try {
     const servicioQuery = `
-            SELECT id, title, description, duration, price, category 
+            SELECT id, title, description, duration, price, category, image_url
             FROM servicios 
             WHERE id = ?
         `;
