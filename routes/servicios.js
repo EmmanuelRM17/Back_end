@@ -5,7 +5,7 @@ const logger = require('../utils/logger');
 
 router.get('/all', async (req, res) => {
   try {
-    const sql = 'SELECT id, title, description, category, price, duration FROM servicios';
+    const sql = 'SELECT * FROM servicios';
     db.query(sql, (err, result) => {
       if (err) {
         logger.error('Error al obtener servicios: ', err);
