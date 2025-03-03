@@ -151,7 +151,8 @@ router.get("/all", async (req, res) => {
             estado,
             notas,
             horario_id,
-            fecha_solicitud
+            fecha_solicitud,
+            archivado
         FROM citas
         ORDER BY fecha_consulta DESC;
     `;
