@@ -232,4 +232,64 @@ router.put('/update/:id', async (req, res) => {
     }
 });
 
+router.delete('/delete/:id', async (req, res) => {
+    const { id } = req.params;
+
+    if (!id || isNaN(id)) {
+        return res.status(400).json({ message: 'ID de cita inválido.' });
+    }
+
+    try {
+        // Obtener los datos de la cita antes de "eliminarla"
+        const selectQuery = `SELECT * FROM citas WHERE id = ?`;
+        db.query(selectQuery, [id], (err, results) => {
+            if (err) {
+                logger.error('Error al obtener la cita:', err);
+                return res.status(500).json({ message: 'Error al obtener la cita.' });
+            }
+
+            if (results.length === 0) {
+                return res.status(404).json({ message: 'No se encontró la cita.' });
+            }
+
+            const cita = results[0];
+
+            // Insertar la cita en el historial médico
+            const insertHistorialQuery = `
+                INSERT INTO historial_medico (paciente_id, cita_id, enfermedades_previas, tratamientos_recientes)
+                VALUES (?, ?, ?, ?)
+            `;
+
+            const valuesHistorial = [
+                cita.paciente_id,
+                cita.id,
+                'N/A', // Aquí puedes agregar lógica para enfermedades previas
+                'N/A'  // Aquí puedes agregar lógica para tratamientos recientes
+            ];
+
+            db.query(insertHistorialQuery, valuesHistorial, (err) => {
+                if (err) {
+                    logger.error('Error al registrar en historial médico:', err);
+                    return res.status(500).json({ message: 'Error al mover la cita al historial médico.' });
+                }
+
+                // Marcar la cita como "Archivada" en lugar de eliminarla
+                const updateCitaQuery = `UPDATE citas SET archivado = TRUE WHERE id = ?`;
+                db.query(updateCitaQuery, [id], (err) => {
+                    if (err) {
+                        logger.error('Error al archivar la cita:', err);
+                        return res.status(500).json({ message: 'Error al archivar la cita.' });
+                    }
+
+                    res.json({ message: 'Cita archivada y movida al historial médico con éxito.' });
+                });
+            });
+        });
+
+    } catch (error) {
+        logger.error('Error en la eliminación de cita:', error);
+        res.status(500).json({ message: 'Error interno del servidor.' });
+    }
+});
+
 module.exports = router;
