@@ -131,30 +131,29 @@ router.get('/pacientes/exists', async (req, res) => {
 router.get("/all", async (req, res) => {
     try {
         const query = `
-SELECT 
-    id AS consulta_id,
-    paciente_id,
-    nombre AS paciente_nombre,
-    apellido_paterno AS paciente_apellido_paterno,
-    apellido_materno AS paciente_apellido_materno,
-    genero AS paciente_genero,
-    fecha_nacimiento AS paciente_fecha_nacimiento,
-    correo AS paciente_correo,
-    telefono AS paciente_telefono,
-    odontologo_id,
-    odontologo_nombre,
-    servicio_id,
-    servicio_nombre,
-    categoria_servicio,
-    precio_servicio,
-    fecha_consulta,
-    estado,
-    notas,
-    horario_id,
-    fecha_solicitud
-FROM citas
-ORDER BY fecha_consulta DESC;
-
+        SELECT 
+            id AS consulta_id,
+            paciente_id,
+            nombre AS paciente_nombre,
+            apellido_paterno AS paciente_apellido_paterno,
+            apellido_materno AS paciente_apellido_materno,
+            genero AS paciente_genero,
+            fecha_nacimiento AS paciente_fecha_nacimiento,
+            correo AS paciente_correo,
+            telefono AS paciente_telefono,
+            odontologo_id,
+            odontologo_nombre,
+            servicio_id,
+            servicio_nombre,
+            categoria_servicio,
+            precio_servicio,
+            fecha_consulta,
+            estado,
+            notas,
+            horario_id,
+            fecha_solicitud
+        FROM citas
+        ORDER BY fecha_consulta DESC;
     `;
 
         // Ejecutar consulta con async/await
