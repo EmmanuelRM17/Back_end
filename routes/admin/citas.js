@@ -167,6 +167,23 @@ router.get("/all", async (req, res) => {
     }
 });
 
+router.get("/activas", async (req, res) => {
+    try {
+        const query = `
+        SELECT * FROM citas
+        WHERE archivado = FALSE
+        ORDER BY fecha_consulta DESC;
+    `;
+
+        const [results] = await db.promise().query(query);
+        res.json(results);
+    } catch (error) {
+        console.error("Error al obtener citas activas:", error);
+        res.status(500).json({ error: "Error interno del servidor" });
+    }
+});
+
+
 router.put('/update/:id', async (req, res) => {
     const { id } = req.params; // Obtener el ID de la cita desde la URL
     const {
