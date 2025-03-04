@@ -17,12 +17,12 @@ const rateLimiter = new RateLimiterMemory({
 
 // Configuración de nodemailer
 const transporter = nodemailer.createTransport({
-    host: 'smtp.hostinger.com', // Servidor SMTP de Hostinger
-    port: 465, // Usa 587 si necesitas STARTTLS
+    host: 'smtp.hostinger.com', 
+    port: 465, 
     secure: true, 
     auth: {
-        user: 'sistema@odontologiacarol.com', // Tu correo empresarial
-        pass: 'sP8+?;Vs:', // La contraseña del correo en Hostinger
+        user: 'sistema@odontologiacarol.com', 
+        pass: 'sP8+?;Vs:', 
     },
 });
 
