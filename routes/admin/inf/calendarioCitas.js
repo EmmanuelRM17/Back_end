@@ -31,7 +31,7 @@ router.get("/agenda/:id", (req, res) => {
   }
 
   const sql = `
-    SELECT
+   SELECT
       -- Datos de la cita
       c.id AS cita_id,
       c.fecha_consulta,
@@ -44,20 +44,18 @@ router.get("/agenda/:id", (req, res) => {
       s.price AS precio_servicio,
       s.duration AS duracion_servicio,
 
-      -- Datos del paciente
-      p.id AS paciente_id,
-      p.nombre,
-      p.aPaterno AS apellido_paterno,
-      p.aMaterno AS apellido_materno,
-      p.genero,
-      p.fechaNacimiento,
-      p.telefono,
-      p.email,
-      p.lugar,
-      p.alergias
+      -- Datos del paciente desde la tabla citas
+      c.paciente_id,
+      c.nombre,
+      c.apellido_paterno,
+      c.apellido_materno,
+      c.genero,
+      c.fecha_nacimiento,
+      c.telefono,
+      c.correo AS email
+      
     FROM citas c
     JOIN servicios s ON c.servicio_id = s.id
-    JOIN pacientes p ON c.paciente_id = p.id
     WHERE c.id = ?;
   `;
 
