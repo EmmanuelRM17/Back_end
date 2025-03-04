@@ -33,9 +33,9 @@ router.post('/nueva', async (req, res) => {
     }
 
     try {
-        const formattedFechaHora = new Date(fecha_hora).toISOString().slice(0, 19).replace('T', ' ');
-        const formattedFechaSolicitud = new Date().toISOString().slice(0, 19).replace('T', ' ');
-        // Verificar si ya existe una cita en la misma fecha y hora con el mismo odontólogo
+        const formattedFechaHora = moment(fecha_hora).tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
+        const formattedFechaSolicitud = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
+
         const checkQuery = `
             SELECT COUNT(*) as count FROM citas 
             WHERE fecha_consulta = ? AND odontologo_id = ?
@@ -235,7 +235,7 @@ router.put('/update/:id', async (req, res) => {
     }
 });
 
-router.delete('/archive/:id', async (req, res) => {
+router.put('/archive/:id', async (req, res) => {
     const { id } = req.params;
 
     if (!id || isNaN(id)) {
@@ -243,7 +243,6 @@ router.delete('/archive/:id', async (req, res) => {
     }
 
     try {
-        // Obtener los datos de la cita antes de "eliminarla"
         const selectQuery = `SELECT * FROM citas WHERE id = ?`;
         const fechaRegistro = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
 
@@ -259,20 +258,19 @@ router.delete('/archive/:id', async (req, res) => {
 
             const cita = results[0];
 
-            // Insertar la cita en el historial médico
+            // Insertar en historial médico
             const insertHistorialQuery = `
-            INSERT INTO historial_medico (paciente_id, cita_id, fecha_registro, enfermedades_previas, tratamientos_recientes)
-            VALUES (?, ?, ?, ?, ?)
-        `;
+                INSERT INTO historial_medico (paciente_id, cita_id, fecha_registro, enfermedades_previas, tratamientos_recientes)
+                VALUES (?, ?, ?, ?, ?)
+            `;
 
-        const valuesHistorial = [
-            cita.paciente_id,
-            cita.id,
-            fechaRegistro, // 🟢 Guardamos la fecha con la zona horaria correcta
-            'N/A',
-            'N/A'
-        ];
-        
+            const valuesHistorial = [
+                cita.paciente_id,
+                cita.id,
+                fechaRegistro,
+                null,  // ✅ Ahora se pueden dejar en NULL en lugar de 'N/A'
+                null
+            ];
 
             db.query(insertHistorialQuery, valuesHistorial, (err) => {
                 if (err) {
@@ -280,21 +278,51 @@ router.delete('/archive/:id', async (req, res) => {
                     return res.status(500).json({ message: 'Error al mover la cita al historial médico.' });
                 }
 
-                // Marcar la cita como "Archivada" en lugar de eliminarla
+                // Actualizar el estado de la cita como archivada
                 const updateCitaQuery = `UPDATE citas SET archivado = TRUE WHERE id = ?`;
+
                 db.query(updateCitaQuery, [id], (err) => {
                     if (err) {
                         logger.error('Error al archivar la cita:', err);
                         return res.status(500).json({ message: 'Error al archivar la cita.' });
                     }
 
-                    res.json({ message: 'Cita archivada y movida al historial médico con éxito.' });
+                    res.json({ message: 'Cita archivada correctamente y movida al historial médico.' });
                 });
             });
         });
 
     } catch (error) {
-        logger.error('Error en la eliminación de cita:', error);
+        logger.error('Error en la función de archivar cita:', error);
+        res.status(500).json({ message: 'Error interno del servidor.' });
+    }
+});
+
+router.put('/cancel/:id', async (req, res) => {
+    const { id } = req.params;
+
+    if (!id || isNaN(id)) {
+        return res.status(400).json({ message: 'ID de cita inválido.' });
+    }
+
+    try {
+        const updateQuery = `UPDATE citas SET estado = 'Cancelada' WHERE id = ?`;
+
+        db.query(updateQuery, [id], (err, result) => {
+            if (err) {
+                logger.error('Error al cancelar la cita:', err);
+                return res.status(500).json({ message: 'Error al cancelar la cita en la base de datos.' });
+            }
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ message: 'No se encontró la cita con el ID proporcionado.' });
+            }
+
+            res.json({ message: 'Cita cancelada correctamente.' });
+        });
+
+    } catch (error) {
+        logger.error('Error en la cancelación de cita:', error);
         res.status(500).json({ message: 'Error interno del servidor.' });
     }
 });
