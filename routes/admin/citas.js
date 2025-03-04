@@ -235,7 +235,7 @@ router.put('/update/:id', async (req, res) => {
     }
 });
 
-router.delete('/delete/:id', async (req, res) => {
+router.delete('/archive/:id', async (req, res) => {
     const { id } = req.params;
 
     if (!id || isNaN(id)) {
