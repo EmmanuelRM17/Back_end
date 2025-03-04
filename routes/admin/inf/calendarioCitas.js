@@ -21,7 +21,7 @@ router.get('/agenda', (req, res) => {
     });
   });
 
-  // 📌 Ruta para obtener los detalles completos de una cita específica
+  // Ruta para obtener los detalles completos de una cita específica
 router.get("/agenda/:id", (req, res) => {
   const citaId = req.params.id;
 
