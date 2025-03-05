@@ -141,6 +141,7 @@ router.put('/update/:id', async (req, res) => {
     const { id } = req.params; // Obtener el ID de la cita desde la URL
     const {
         servicio_id,
+        servicio_nombre,
         categoria_servicio,
         precio_servicio,
         fecha_consulta,
@@ -164,19 +165,20 @@ router.put('/update/:id', async (req, res) => {
 
     try {
         const updateQuery = `
-            UPDATE citas
-            SET 
-                servicio_id = ?, 
-                categoria_servicio = ?, 
-                precio_servicio = ?, 
-                fecha_consulta = ?, 
-                estado = ?, 
-                notas = ?
-            WHERE id = ?
-        `;
-
+    UPDATE citas
+    SET 
+        servicio_id = ?,
+        servicio_nombre = ?,
+        categoria_servicio = ?,
+        precio_servicio = ?,
+        fecha_consulta = ?,
+        estado = ?,
+        notas = ?
+    WHERE id = ?
+`;
         const values = [
             parseInt(servicio_id),
+            xss(servicio_nombre),
             xss(categoria_servicio),
             parseFloat(precio_servicio),
             new Date(fecha_consulta), // Se asegura de que el formato sea datetime
