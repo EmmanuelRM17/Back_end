@@ -41,28 +41,7 @@ router.get('/exists', async (req, res) => {
 router.get('/all', async (req, res) => {
     try {
         const query = `
-            SELECT 
-                id,
-                nombre,
-                aPaterno AS apellido_paterno,
-                aMaterno AS apellido_materno,
-                tipoTutor AS tipo_tutor,
-                nombreTutor AS nombre_tutor,
-                genero,
-                lugar,
-                fechaNacimiento AS fecha_nacimiento,
-                telefono,
-                email,
-                alergias,
-                estado,
-                fecha_creacion,
-                ultima_actualizacion,
-                verificado,
-                token_verificacion,
-                token_expiracion,
-                registro_completo,
-                cookie
-            FROM pacientes
+            SELECT * FROM pacientes
             ORDER BY fecha_creacion DESC;
         `;
 
