@@ -64,14 +64,15 @@ const Horarios = require("./routes/empleado/horarios")
 const CalendarioCitas = require("./routes/admin/inf/calendarioCitas")
 
 //pacientes
+const paciente =require("./routes/pacientes/pacientes")
 const p_perfil = require("./routes/pacientes/perfil")
 
 // Asignar rutas
 app.use("/api", Registrer);
 app.use("/api/users", userRoutes);
 app.use("/api/citas", Citas)
-//administrador
 
+//administrador
 app.use("/api/politicas", politicasRoutes);
 app.use("/api/deslinde", deslindeRoutes);
 app.use("/api/termiCondicion", terminosRoutes);
@@ -89,6 +90,7 @@ app.use("/api/empleados", Empleados);
 app.use("/api/horarios", Horarios);
 
 //pacientes
+app.use("/api/pacientes", paciente)
 app.use("/api/profile", p_perfil);
 
 app.listen(3001, () => {

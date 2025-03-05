@@ -97,38 +97,6 @@ router.post('/nueva', async (req, res) => {
     }
 });
 
-router.get('/pacientes/exists', async (req, res) => {
-    const { email } = req.query;
-
-    if (!email) {
-        return res.status(400).json({ message: 'El correo electrónico es obligatorio.' });
-    }
-
-    try {
-        const sanitizedEmail = xss(email);
-
-        // Consulta para obtener todos los datos del paciente por su correo
-        const query = 'SELECT * FROM pacientes WHERE email = ? LIMIT 1';
-        db.query(query, [sanitizedEmail], (err, result) => {
-            if (err) {
-                logger.error('Error al obtener el paciente en la BDD: ', err);
-                return res.status(500).json({ message: 'Error al obtener el paciente en la base de datos.' });
-            }
-
-            if (result.length > 0) {
-                // Si se encuentra un paciente, se devuelven todos sus datos
-                res.json({ exists: true, data: result[0] });
-            } else {
-                // Si no se encuentra el paciente
-                res.json({ exists: false, data: null });
-            }
-        });
-    } catch (error) {
-        logger.error('Error en el endpoint /pacientes/exists: ', error);
-        res.status(500).json({ message: 'Error en el servidor.' });
-    }
-});
-
 router.get("/all", async (req, res) => {
     try {
         const query = `
