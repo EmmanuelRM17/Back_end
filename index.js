@@ -60,8 +60,9 @@ const preguntas = require("./routes/admin/preguntas");
 const contactanos = require("./routes/admin/contact");
 const expediente = require("./routes/empleado/expedientClinic");
 const Empleados = require("./routes/empleado/empleados");
-const Horarios = require("./routes/empleado/horarios")
-const CalendarioCitas = require("./routes/admin/inf/calendarioCitas")
+const Horarios = require("./routes/empleado/horarios");
+const CalendarioCitas = require("./routes/admin/inf/calendarioCitas");
+const Graficas = require("./routes/admin/inf/graficas");
 
 //pacientes
 const paciente =require("./routes/pacientes/pacientes")
@@ -83,6 +84,7 @@ app.use("/api/servicios", servicios)
 app.use("/api/preguntas", preguntas);
 app.use("/api/contacto",contactanos);
 app.use("/api/calendario",CalendarioCitas);
+app.use("/api/Graficas",Graficas);
 
 //empleados
 app.use("/api/expediente", expediente);
