@@ -46,7 +46,7 @@ router.put('/estado/:id', (req, res) => {
 
   db.query(query, [estado, id], (err, result) => {
     if (err) {
-      console.error("❌ Error al actualizar el estado:", err);
+      console.error("Error al actualizar el estado:", err);
       return res.status(500).json({ error: "Error interno del servidor" });
     }
     
