@@ -66,31 +66,29 @@ router.delete('/eliminar/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    // Conexión a la base de datos
-    const connection = await db.getConnection();
-    
-    // Ejecutar la consulta
-    const [result] = await connection.query(`DELETE FROM resenyas WHERE id = ?`, [id]);
+    console.log(`🔍 Intentando eliminar reseña con ID: ${id}`);
 
-    // Liberar la conexión después de la consulta
-    connection.release();
+    // Ejecutar la consulta directamente sin `getConnection()`
+    const [result] = await db.query(`DELETE FROM resenyas WHERE id = ?`, [id]);
 
     console.log("🟢 Resultado de la consulta:", result);
 
     // Si no se afectaron filas, significa que la reseña no existía
     if (!result || result.affectedRows === 0) {
+      console.warn("⚠️ No se encontró la reseña para eliminar.");
       return res.status(404).json({ error: 'Reseña no encontrada' });
     }
+
+    console.log("✅ Reseña eliminada con éxito.");
     return res.status(200).json({ message: 'Reseña eliminada correctamente' });
 
   } catch (error) {
-
+    console.error("❌ Error al eliminar la reseña:", error);
     return res.status(500).json({
       error: "Error interno del servidor",
       details: error.message
     });
   }
 });
-
 
 module.exports = router;
