@@ -20,8 +20,13 @@ router.get("/get", async (req, res) => {
       ORDER BY r.fecha_creacion DESC;
     `;
 
-    const [results] = await db.query(query); 
-    res.json(results);
+    db.query(query, (err, results) => {
+      if (err) {
+        console.error("Error al obtener las reseñas:", err);
+        return res.status(500).json({ error: "Error interno del servidor" });
+      }
+      res.json(results);
+    });
   } catch (error) {
     console.error("Error en la consulta:", error);
     res.status(500).json({ error: "Error en el servidor" });
