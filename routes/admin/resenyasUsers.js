@@ -62,33 +62,29 @@ router.put('/estado/:id', (req, res) => {
   });
 });
 
-router.delete('/eliminar/:id', async (req, res) => {
+router.delete('/eliminar/:id', (req, res) => {
   const { id } = req.params;
 
-  try {
-    console.log(`🔍 Intentando eliminar reseña con ID: ${id}`);
+  console.log(`Intentando eliminar reseña con ID: ${id}`);
 
-    // Ejecutar la consulta directamente sin `getConnection()`
-    const [result] = await db.query(`DELETE FROM resenyas WHERE id = ?`, [id]);
+  const query = `DELETE FROM resenyas WHERE id = ?`;
 
-    console.log("🟢 Resultado de la consulta:", result);
-
-    // Si no se afectaron filas, significa que la reseña no existía
-    if (!result || result.affectedRows === 0) {
-      console.warn("⚠️ No se encontró la reseña para eliminar.");
-      return res.status(404).json({ error: 'Reseña no encontrada' });
+  db.query(query, [id], (err, result) => {
+    if (err) {
+      console.error("Error al eliminar la reseña:", err);
+      return res.status(500).json({ error: "Error interno del servidor", details: err.message });
     }
 
-    console.log("✅ Reseña eliminada con éxito.");
-    return res.status(200).json({ message: 'Reseña eliminada correctamente' });
+    console.log("Resultado de la consulta:", result);
 
-  } catch (error) {
-    console.error("❌ Error al eliminar la reseña:", error);
-    return res.status(500).json({
-      error: "Error interno del servidor",
-      details: error.message
-    });
-  }
+    if (!result || result.affectedRows === 0) {
+      console.warn("⚠️ No se encontró la reseña para eliminar.");
+      return res.status(404).json({ error: "Reseña no encontrada" });
+    }
+
+    console.log("Reseña eliminada con éxito.");
+    return res.status(200).json({ message: "Reseña eliminada correctamente" });
+  });
 });
 
 
