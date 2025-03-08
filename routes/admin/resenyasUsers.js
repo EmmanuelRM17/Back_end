@@ -20,19 +20,13 @@ router.get("/get", async (req, res) => {
       ORDER BY r.fecha_creacion DESC;
     `;
 
-    db.query(query, (err, results) => {
-      if (err) {
-        console.error("Error al obtener las reseñas:", err);
-        return res.status(500).json({ error: "Error interno del servidor" });
-      }
-      res.json(results);
-    });
+    const [results] = await db.query(query); 
+    res.json(results);
   } catch (error) {
     console.error("Error en la consulta:", error);
     res.status(500).json({ error: "Error en el servidor" });
   }
 });
-
 
 router.put('/estado/:id', (req, res) => {
   const { id } = req.params;
@@ -67,11 +61,8 @@ router.delete('/eliminar/:id', async (req, res) => {
   const { id } = req.params;
 
   try {
-    const [result] = await db.query(
-      `DELETE FROM resenyas 
-       WHERE id = ?`,
-      [id] // Parametrización
-    );
+    const query = `DELETE FROM resenyas WHERE id = ?`;
+    const [result] = await db.query(query, [id]); 
 
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: 'Reseña no encontrada' });
@@ -80,8 +71,9 @@ router.delete('/eliminar/:id', async (req, res) => {
     res.status(200).json({ message: 'Reseña eliminada correctamente' });
   } catch (error) {
     console.error('Error al eliminar la reseña:', error);
-    res.status(500).json({ error: 'Error en el servidor' });
+    res.status(500).json({ error: 'Error interno del servidor' });
   }
 });
+
 
 module.exports = router;
