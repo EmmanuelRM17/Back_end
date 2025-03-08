@@ -33,33 +33,33 @@ router.get("/get", async (req, res) => {
   }
 });
 
-
-router.put('/estado/:id', async (req, res) => {
+router.put('/estado/:id', (req, res) => {
   const { id } = req.params;
   const { estado } = req.body;
 
-  // Validar que el estado sea solo Habilitado o Deshabilitado
+  // Validar que el estado solo sea "Habilitado" o "Deshabilitado"
   if (!['Habilitado', 'Deshabilitado'].includes(estado)) {
     return res.status(400).json({ error: 'Estado inválido. Valores permitidos: Habilitado o Deshabilitado' });
   }
 
-  try {
-    const [result] = await db.query(
-      `UPDATE resenyas 
-       SET estado = ? 
-       WHERE id = ?`,
-      [estado, id]  // Parametrización para evitar inyección SQL
-    );
+  const query = `
+    UPDATE resenyas 
+    SET estado = ? 
+    WHERE id = ?;
+  `;
 
+  db.query(query, [estado, id], (err, result) => {
+    if (err) {
+      console.error("❌ Error al actualizar el estado:", err);
+      return res.status(500).json({ error: "Error interno del servidor" });
+    }
+    
     if (result.affectedRows === 0) {
-      return res.status(404).json({ error: 'Reseña no encontrada' });
+      return res.status(404).json({ error: "Reseña no encontrada" });
     }
 
     res.status(200).json({ message: `Reseña actualizada a ${estado}` });
-  } catch (error) {
-    console.error('Error al actualizar el estado:', error);
-    res.status(500).json({ error: 'Error en el servidor' });
-  }
+  });
 });
 
 router.delete('/eliminar/:id', async (req, res) => {
