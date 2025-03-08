@@ -2,10 +2,10 @@ const express = require('express');
 const router = express.Router();
 const db = require('../../db'); // Importa tu módulo de conexión a la BD
 
-router.get('/get', async (req, res) => {
+router.get("/get", async (req, res) => {
   try {
-    const [rows] = await db.query(
-      `SELECT 
+    const query = `
+      SELECT 
          r.id AS reseñaId,
          r.comentario,
          r.calificacion,
@@ -15,16 +15,24 @@ router.get('/get', async (req, res) => {
          p.nombre,
          p.aPaterno,
          p.aMaterno
-       FROM resenyas r
-       JOIN pacientes p ON r.paciente_id = p.id
-       ORDER BY r.fecha_creacion DESC`
-    );
-    res.status(200).json(rows);
+      FROM resenyas r
+      JOIN pacientes p ON r.paciente_id = p.id
+      ORDER BY r.fecha_creacion DESC;
+    `;
+
+    db.query(query, (err, results) => {
+      if (err) {
+        console.error("Error al obtener las reseñas:", err);
+        return res.status(500).json({ error: "Error interno del servidor" });
+      }
+      res.json(results);
+    });
   } catch (error) {
-    console.error('Error al obtener las reseñas:', error);
-    res.status(500).json({ error: 'Error en el servidor' });
+    console.error("Error en la consulta:", error);
+    res.status(500).json({ error: "Error en el servidor" });
   }
 });
+
 
 router.put('/estado/:id', async (req, res) => {
   const { id } = req.params;
