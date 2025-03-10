@@ -55,6 +55,7 @@ const terminosRoutes = require("./routes/admin/inf/inf_terminosYcondicion");
 const perfil_empresa = require("./routes/admin/inf/inf_perfilEmpresa");
 const redes = require("./routes/admin/inf/inf_redessociales");
 const servicios=  require("./routes/servicios"); 
+const imagenes=  require("./routes/imagenes.js"); 
 const reportes = require("./routes/admin/inf/inf_reportes");
 const preguntas = require("./routes/admin/preguntas");
 const contactanos = require("./routes/admin/contact");
@@ -82,6 +83,7 @@ app.use("/api/perfilEmpresa", perfil_empresa);
 app.use("/api/redesSociales", redes);
 app.use("/api/reportes", reportes);
 app.use("/api/servicios", servicios)
+app.use("/api/imagenes", imagenes)
 app.use("/api/preguntas", preguntas);
 app.use("/api/contacto",contactanos);
 app.use("/api/calendario",CalendarioCitas);
