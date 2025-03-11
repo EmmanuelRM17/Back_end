@@ -9,7 +9,7 @@ function validateUrl(url) {
 
 // Endpoint para obtener todas las redes sociales
 router.get('/all', (req, res) => {
-    const query = `SELECT * FROM redes_sociales`;
+    const query = `SELECT * FROM inf_redes_sociales`;
     
     db.query(query, (err, results) => {
         if (err) {
