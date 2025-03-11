@@ -332,5 +332,193 @@ router.get('/direccion', (req, res) => {
     });
 });
 
+/**
+ * Endpoint para obtener información para el header/footer 
+ * Combina datos de dirección, teléfono y horarios
+ */
+router.get('/infoHeader', (req, res) => {
+    // Obtener el día de la semana actual (Lunes, Martes, etc.)
+    const today = new Date();
+    const dayOfWeek = today.getDay(); // 0 es domingo, 1 es lunes, etc.
+    
+    // Convertir el número del día a nombre en español
+    const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+    const currentDayName = dayNames[dayOfWeek];
+    
+    // Consulta para obtener información de la empresa
+    const queryEmpresa = `
+        SELECT 
+            calle_numero,
+            localidad, 
+            municipio, 
+            estado, 
+            telefono_principal 
+        FROM inf_perfil_empresa 
+        LIMIT 1
+    `;
+    
+    // Consulta para obtener los horarios del día actual
+    const queryHorario = `
+        SELECT 
+            dia_semana, 
+            hora_inicio, 
+            hora_fin 
+        FROM horarios 
+        WHERE dia_semana = ?
+        ORDER BY hora_inicio ASC
+    `;
+    
+    // Consulta para obtener el resumen de horarios de toda la semana
+    const querySemana = `
+        SELECT 
+            dia_semana, 
+            MIN(hora_inicio) as hora_min, 
+            MAX(hora_fin) as hora_max 
+        FROM horarios 
+        GROUP BY dia_semana
+        ORDER BY FIELD(dia_semana, 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo')
+    `;
+    
+    // Ejecutar consulta para obtener datos de la empresa
+    db.query(queryEmpresa, (err, empresaResults) => {
+        if (err) {
+            console.error('Error al obtener datos de empresa:', err);
+            return res.status(500).json({ message: 'Error en el servidor al obtener información de la empresa.' });
+        }
+        
+        if (empresaResults.length === 0) {
+            return res.status(404).json({ message: 'No se encontró información de la empresa.' });
+        }
+        
+        const empresa = empresaResults[0];
+        
+        // Ejecutar consulta para obtener horarios del día actual
+        db.query(queryHorario, [currentDayName], (err, horarioResults) => {
+            if (err) {
+                console.error('Error al obtener horarios del día:', err);
+                return res.status(500).json({ message: 'Error en el servidor al obtener horarios.' });
+            }
+            
+            // Formatear horarios de hoy
+            const horariosHoy = [];
+            let estaAbierto = false;
+            
+            if (horarioResults.length > 0) {
+                estaAbierto = true; // Podría estar abierto si hay horarios para hoy
+                
+                horarioResults.forEach(horario => {
+                    // Formatear hora (quitar segundos)
+                    const inicio = horario.hora_inicio.substring(0, 5);
+                    const fin = horario.hora_fin.substring(0, 5);
+                    horariosHoy.push(`${inicio} - ${fin}`);
+                });
+            } else {
+                horariosHoy.push("Cerrado hoy");
+            }
+            
+            // Obtener resumen semanal de horarios
+            db.query(querySemana, (err, semanaResults) => {
+                if (err) {
+                    console.error('Error al obtener horarios semanales:', err);
+                    return res.status(500).json({ message: 'Error en el servidor al obtener horarios semanales.' });
+                }
+                
+                // Determinar rango de días de trabajo y horario general
+                let diasLaborables = "";
+                
+                if (semanaResults.length > 0) {
+                    // Verificar si los días van de lunes a viernes
+                    const dias = semanaResults.map(d => d.dia_semana);
+                    const hayLunes = dias.includes('Lunes');
+                    const hayViernes = dias.includes('Viernes');
+                    
+                    // Determinar si todos los días tienen el mismo horario
+                    let mismoHorario = true;
+                    const primerHoraMin = semanaResults[0].hora_min;
+                    const primerHoraMax = semanaResults[0].hora_max;
+                    
+                    semanaResults.forEach(dia => {
+                        if (dia.hora_min.toString() !== primerHoraMin.toString() || 
+                            dia.hora_max.toString() !== primerHoraMax.toString()) {
+                            mismoHorario = false;
+                        }
+                    });
+                    
+                    // Si hay días continuos de lunes a viernes
+                    if (hayLunes && hayViernes && 
+                        dias.includes('Martes') && 
+                        dias.includes('Miércoles') && 
+                        dias.includes('Jueves')) {
+                        
+                        // Si el horario es el mismo para todos los días, simplificamos
+                        if (mismoHorario) {
+                            const inicio = primerHoraMin.substring(0, 5);
+                            const fin = primerHoraMax.substring(0, 5);
+                            diasLaborables = `Lun - Vie: ${inicio} - ${fin}`;
+                        } else {
+                            // Buscar el horario más amplio si son diferentes
+                            let horaMinGeneral = '23:59';
+                            let horaMaxGeneral = '00:00';
+                            
+                            semanaResults.forEach(dia => {
+                                const horaMin = dia.hora_min.substring(0, 5);
+                                const horaMax = dia.hora_max.substring(0, 5);
+                                
+                                if (horaMin < horaMinGeneral) horaMinGeneral = horaMin;
+                                if (horaMax > horaMaxGeneral) horaMaxGeneral = horaMax;
+                            });
+                            
+                            diasLaborables = `Lun - Vie: ${horaMinGeneral} - ${horaMaxGeneral}`;
+                        }
+                    } else {
+                        // Para días no consecutivos o si no hay lunes a viernes completos
+                        // Usamos abreviaturas
+                        const abreviaturas = {
+                            'Lunes': 'Lun', 
+                            'Martes': 'Mar', 
+                            'Miércoles': 'Mié', 
+                            'Jueves': 'Jue', 
+                            'Viernes': 'Vie', 
+                            'Sábado': 'Sáb', 
+                            'Domingo': 'Dom'
+                        };
+                        
+                        // Si todos tienen el mismo horario
+                        if (mismoHorario) {
+                            const diasAbreviados = dias.map(d => abreviaturas[d]).join(', ');
+                            const inicio = primerHoraMin.substring(0, 5);
+                            const fin = primerHoraMax.substring(0, 5);
+                            diasLaborables = `${diasAbreviados}: ${inicio} - ${fin}`;
+                        } else {
+                            // Si tienen horarios diferentes, mostrar solo días
+                            const diasAbreviados = dias.map(d => abreviaturas[d]).join(', ');
+                            diasLaborables = `${diasAbreviados}: Horario variable`;
+                        }
+                    }
+                } else {
+                    diasLaborables = "Horario no disponible";
+                }
+                
+                // Construir la dirección completa y abreviada
+                const direccionCompleta = `${empresa.calle_numero}, ${empresa.localidad}, ${empresa.municipio}, ${empresa.estado}`;
+                const direccionCorta = `${empresa.calle_numero}, ${empresa.localidad}`;
+                
+                // Enviar respuesta con toda la información formateada
+                res.status(200).json({
+                    direccion: direccionCompleta,
+                    direccionCorta: direccionCorta,
+                    telefono: empresa.telefono_principal,
+                    horarioHoy: {
+                        dia: currentDayName,
+                        horarios: horariosHoy,
+                        estaAbierto: estaAbierto
+                    },
+                    horarioGeneral: diasLaborables
+                });
+            });
+        });
+    });
+});
+
 // Exportar el router
 module.exports = router;
