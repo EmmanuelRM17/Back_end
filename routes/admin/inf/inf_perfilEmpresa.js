@@ -519,49 +519,61 @@ router.get('/infoHeader', (req, res) => {
         });
     });
 });
-/**
- * Endpoint para obtener todos los horarios de atención organizados por día
- * Proporciona información detallada para la sección de Calendario de Atención
- */
+
+
 router.get('/horarios-atencion', (req, res) => {
     // Nombres de los días de la semana en español
     const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-
+    
     // Obtener la fecha actual para determinar qué día es hoy
     const today = new Date();
     const currentDayName = diasSemana[today.getDay() === 0 ? 6 : today.getDay() - 1]; // Ajuste: 0=domingo en JS
-
+    
     // Consulta para obtener los horarios agrupados por día
     const query = `
         SELECT 
             dia_semana, 
-            GROUP_CONCAT(CONCAT(SUBSTRING(hora_inicio, 1, 5), ' - ', SUBSTRING(hora_fin, 1, 5)) SEPARATOR ', ') AS horarios,
+            GROUP_CONCAT(CONCAT(SUBSTRING(hora_inicio, 1, 5), '-', SUBSTRING(hora_fin, 1, 5)) SEPARATOR ', ') AS horarios,
             MIN(hora_inicio) as apertura,
             MAX(hora_fin) as cierre
         FROM horarios 
         GROUP BY dia_semana
         ORDER BY FIELD(dia_semana, 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo')
     `;
-
+    
     db.query(query, (err, results) => {
         if (err) {
             console.error('Error al obtener horarios:', err);
             return res.status(500).json({ message: 'Error al obtener los horarios de atención.' });
         }
-
+        
         // Crear un objeto con todos los días, incluso los que no tienen horarios (cerrados)
         const horariosCompletos = diasSemana.map(dia => {
             // Buscar si hay horarios para este día
             const horarioDia = results.find(r => r.dia_semana === dia);
-
+            
             if (horarioDia) {
+                // Verificar el horario actual para saber si está abierto ahora mismo
+                let estaAbiertoAhora = false;
+                
+                if (dia === currentDayName) {
+                    const horaActual = today.getHours() * 100 + today.getMinutes();
+                    const horaApertura = parseInt(horarioDia.apertura.substring(0, 2)) * 100 + 
+                                        parseInt(horarioDia.apertura.substring(3, 5));
+                    const horaCierre = parseInt(horarioDia.cierre.substring(0, 2)) * 100 + 
+                                      parseInt(horarioDia.cierre.substring(3, 5));
+                    
+                    estaAbiertoAhora = horaActual >= horaApertura && horaActual <= horaCierre;
+                }
+                
                 return {
                     dia: dia,
                     estado: 'abierto',
                     horas: horarioDia.horarios,
-                    apertura: horarioDia.apertura,
-                    cierre: horarioDia.cierre,
-                    esHoy: dia === currentDayName
+                    apertura: horarioDia.apertura.substring(0, 5),
+                    cierre: horarioDia.cierre.substring(0, 5),
+                    esHoy: dia === currentDayName,
+                    estaAbiertoAhora: estaAbiertoAhora
                 };
             } else {
                 return {
@@ -570,19 +582,12 @@ router.get('/horarios-atencion', (req, res) => {
                     horas: 'Cerrado',
                     apertura: null,
                     cierre: null,
-                    esHoy: dia === currentDayName
+                    esHoy: dia === currentDayName,
+                    estaAbiertoAhora: false
                 };
             }
         });
-
-        // Verificar si hay horarios disponibles
-        if (results.length === 0) {
-            return res.status(200).json({
-                message: 'No hay horarios configurados',
-                horarios: horariosCompletos
-            });
-        }
-
+        
         // Devolver los horarios completos
         res.status(200).json({
             message: 'Horarios de atención obtenidos correctamente',
@@ -591,5 +596,4 @@ router.get('/horarios-atencion', (req, res) => {
         });
     });
 });
-// Exportar el router
 module.exports = router;
