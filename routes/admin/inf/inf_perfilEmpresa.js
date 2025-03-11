@@ -3,7 +3,10 @@ const db = require('../../../db');
 const multer = require('multer');
 const router = express.Router();
 
-// Configuración de multer para manejar la subida de archivos en memoria
+/**
+ * Configuración de multer para manejar la subida de archivos en memoria
+ * Permite subir imágenes de hasta 10MB y restringe el tipo de archivo
+ */
 const storage = multer.memoryStorage();
 const upload = multer({
     storage: storage,
@@ -28,17 +31,58 @@ router.post('/insert', (req, res, next) => {
         next();
     });
 }, (req, res) => {
-    const { nombre_empresa, direccion, telefono, correo_electronico, descripcion, slogan } = req.body;
+    const { 
+        nombre_pagina, 
+        calle_numero, 
+        localidad, 
+        municipio, 
+        estado, 
+        codigo_postal, 
+        pais, 
+        telefono_principal, 
+        correo_electronico, 
+        sitio_web, 
+        descripcion, 
+        slogan 
+    } = req.body;
+    
     const logo = req.file ? req.file.buffer : null;
 
-    if (!nombre_empresa || !correo_electronico) {
-        return res.status(400).send('Nombre de empresa y correo electrónico son obligatorios');
+    if (!nombre_pagina || !correo_electronico) {
+        return res.status(400).send('Nombre de página y correo electrónico son obligatorios');
     }
 
-    const query = `INSERT INTO inf_perfil_empresa (nombre_empresa, direccion, telefono, correo_electronico, descripcion, logo, slogan) 
-                   VALUES (?, ?, ?, ?, ?, ?, ?)`;
+    const query = `INSERT INTO inf_perfil_empresa (
+        nombre_pagina, 
+        calle_numero, 
+        localidad, 
+        municipio, 
+        estado, 
+        codigo_postal, 
+        pais, 
+        telefono_principal, 
+        correo_electronico, 
+        sitio_web, 
+        descripcion, 
+        logo, 
+        slogan
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
-    db.query(query, [nombre_empresa, direccion, telefono, correo_electronico, descripcion, logo, slogan], (err, result) => {
+    db.query(query, [
+        nombre_pagina, 
+        calle_numero, 
+        localidad, 
+        municipio || 'Huejutla', 
+        estado || 'Hidalgo', 
+        codigo_postal, 
+        pais || 'México', 
+        telefono_principal, 
+        correo_electronico, 
+        sitio_web, 
+        descripcion, 
+        logo, 
+        slogan
+    ], (err, result) => {
         if (err) {
             console.log(err);
             return res.status(500).send('Error en el servidor');
@@ -66,7 +110,7 @@ router.get('/get', (req, res) => {
             perfilEmpresa.logo = perfilEmpresa.logo.toString('base64');
         }
 
-        res.status(200).json(perfilEmpresa); // Devuelve el resultado con los nuevos campos incluidos
+        res.status(200).json(perfilEmpresa);
     });
 });
 
@@ -110,19 +154,60 @@ router.put('/updateLogo', (req, res, next) => {
 
 // Endpoint para actualizar datos de la empresa
 router.put('/updateDatos', (req, res) => {
-    const { id_empresa, nombre_empresa, direccion, telefono, correo_electronico, descripcion, slogan } = req.body;
+    const { 
+        id_empresa, 
+        nombre_pagina, 
+        calle_numero, 
+        localidad, 
+        municipio, 
+        estado, 
+        codigo_postal, 
+        pais, 
+        telefono_principal, 
+        correo_electronico, 
+        sitio_web, 
+        descripcion, 
+        slogan 
+    } = req.body;
 
     if (!id_empresa) {
         return res.status(400).send('El id_empresa es obligatorio para actualizar los datos');
     }
 
-    if (!nombre_empresa || !correo_electronico) {
-        return res.status(400).send('Nombre de empresa y correo electrónico son obligatorios');
+    if (!nombre_pagina || !correo_electronico) {
+        return res.status(400).send('Nombre de página y correo electrónico son obligatorios');
     }
 
-    const query = `UPDATE inf_perfil_empresa SET nombre_empresa = ?, direccion = ?, telefono = ?, correo_electronico = ?, descripcion = ?, slogan = ? WHERE id_empresa = ?`;
+    const query = `UPDATE inf_perfil_empresa SET 
+        nombre_pagina = ?, 
+        calle_numero = ?, 
+        localidad = ?, 
+        municipio = ?, 
+        estado = ?, 
+        codigo_postal = ?, 
+        pais = ?, 
+        telefono_principal = ?, 
+        correo_electronico = ?, 
+        sitio_web = ?, 
+        descripcion = ?, 
+        slogan = ? 
+        WHERE id_empresa = ?`;
 
-    const queryParams = [nombre_empresa, direccion, telefono, correo_electronico, descripcion, slogan, id_empresa];
+    const queryParams = [
+        nombre_pagina, 
+        calle_numero, 
+        localidad, 
+        municipio || 'Huejutla', 
+        estado || 'Hidalgo', 
+        codigo_postal, 
+        pais || 'México', 
+        telefono_principal, 
+        correo_electronico, 
+        sitio_web, 
+        descripcion, 
+        slogan, 
+        id_empresa
+    ];
 
     db.query(query, queryParams, (err, result) => {
         if (err) {
@@ -154,7 +239,7 @@ router.delete('/delete/:id', (req, res) => {
 
 // Endpoint para obtener el nombre de la empresa y el logo
 router.get('/getTitleAndLogo', (req, res) => {
-    const query = `SELECT nombre_empresa, logo FROM inf_perfil_empresa LIMIT 1`;
+    const query = `SELECT nombre_pagina, logo FROM inf_perfil_empresa LIMIT 1`;
 
     db.query(query, (err, results) => {
         if (err) {
@@ -175,15 +260,30 @@ router.get('/getTitleAndLogo', (req, res) => {
 
         // Enviar el nombre de la empresa y el logo
         res.status(200).json({
-            nombre_empresa: perfilEmpresa.nombre_empresa,
+            nombre_pagina: perfilEmpresa.nombre_pagina,
             logo: perfilEmpresa.logo,
         });
     });
 });
 
-// Endpoint para obtener los datos de la empresa
+// Endpoint para obtener los datos básicos de la empresa para contacto/footer
 router.get('/empresa', (req, res) => {
-    const query = 'SELECT nombre_empresa, slogan, direccion, telefono, correo_electronico FROM inf_perfil_empresa LIMIT 1'; // Obtener el primer registro
+    const query = `
+        SELECT 
+            nombre_pagina, 
+            slogan, 
+            calle_numero, 
+            localidad, 
+            municipio, 
+            estado, 
+            codigo_postal, 
+            telefono_principal, 
+            correo_electronico, 
+            sitio_web 
+        FROM inf_perfil_empresa 
+        LIMIT 1
+    `; 
+    
     db.query(query, (err, results) => {
         if (err) {
             console.error('Error al obtener los datos de la empresa:', err);
@@ -195,5 +295,42 @@ router.get('/empresa', (req, res) => {
         res.status(200).json(results[0]); // Retornar el primer resultado
     });
 });
+
+// Endpoint para obtener dirección completa formateada
+router.get('/direccion', (req, res) => {
+    const query = `
+        SELECT 
+            calle_numero, 
+            localidad, 
+            municipio, 
+            estado, 
+            codigo_postal, 
+            pais
+        FROM inf_perfil_empresa 
+        LIMIT 1
+    `;
+    
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener la dirección:', err);
+            return res.status(500).json({ message: 'Error al obtener la dirección.' });
+        }
+        
+        if (results.length === 0) {
+            return res.status(404).json({ message: 'No se encontró información de dirección.' });
+        }
+        
+        const dir = results[0];
+        
+        // Formatear la dirección completa para mostrar
+        const direccionCompleta = `${dir.calle_numero}, ${dir.localidad}, ${dir.municipio}, ${dir.estado}, C.P. ${dir.codigo_postal}, ${dir.pais}`;
+        
+        res.status(200).json({
+            direccionDesglosada: dir,
+            direccionCompleta: direccionCompleta
+        });
+    });
+});
+
 // Exportar el router
 module.exports = router;
