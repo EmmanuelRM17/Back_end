@@ -1,5 +1,5 @@
 const express = require('express');
-const db = require('../../../db'); 
+const db = require('../../../db');
 const multer = require('multer');
 const router = express.Router();
 
@@ -31,21 +31,21 @@ router.post('/insert', (req, res, next) => {
         next();
     });
 }, (req, res) => {
-    const { 
-        nombre_pagina, 
-        calle_numero, 
-        localidad, 
-        municipio, 
-        estado, 
-        codigo_postal, 
-        pais, 
-        telefono_principal, 
-        correo_electronico, 
-        sitio_web, 
-        descripcion, 
-        slogan 
+    const {
+        nombre_pagina,
+        calle_numero,
+        localidad,
+        municipio,
+        estado,
+        codigo_postal,
+        pais,
+        telefono_principal,
+        correo_electronico,
+        sitio_web,
+        descripcion,
+        slogan
     } = req.body;
-    
+
     const logo = req.file ? req.file.buffer : null;
 
     if (!nombre_pagina || !correo_electronico) {
@@ -69,18 +69,18 @@ router.post('/insert', (req, res, next) => {
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
 
     db.query(query, [
-        nombre_pagina, 
-        calle_numero, 
-        localidad, 
-        municipio || 'Huejutla', 
-        estado || 'Hidalgo', 
-        codigo_postal, 
-        pais || 'México', 
-        telefono_principal, 
-        correo_electronico, 
-        sitio_web, 
-        descripcion, 
-        logo, 
+        nombre_pagina,
+        calle_numero,
+        localidad,
+        municipio || 'Huejutla',
+        estado || 'Hidalgo',
+        codigo_postal,
+        pais || 'México',
+        telefono_principal,
+        correo_electronico,
+        sitio_web,
+        descripcion,
+        logo,
         slogan
     ], (err, result) => {
         if (err) {
@@ -154,20 +154,20 @@ router.put('/updateLogo', (req, res, next) => {
 
 // Endpoint para actualizar datos de la empresa
 router.put('/updateDatos', (req, res) => {
-    const { 
-        id_empresa, 
-        nombre_pagina, 
-        calle_numero, 
-        localidad, 
-        municipio, 
-        estado, 
-        codigo_postal, 
-        pais, 
-        telefono_principal, 
-        correo_electronico, 
-        sitio_web, 
-        descripcion, 
-        slogan 
+    const {
+        id_empresa,
+        nombre_pagina,
+        calle_numero,
+        localidad,
+        municipio,
+        estado,
+        codigo_postal,
+        pais,
+        telefono_principal,
+        correo_electronico,
+        sitio_web,
+        descripcion,
+        slogan
     } = req.body;
 
     if (!id_empresa) {
@@ -194,18 +194,18 @@ router.put('/updateDatos', (req, res) => {
         WHERE id_empresa = ?`;
 
     const queryParams = [
-        nombre_pagina, 
-        calle_numero, 
-        localidad, 
-        municipio || 'Huejutla', 
-        estado || 'Hidalgo', 
-        codigo_postal, 
-        pais || 'México', 
-        telefono_principal, 
-        correo_electronico, 
-        sitio_web, 
-        descripcion, 
-        slogan, 
+        nombre_pagina,
+        calle_numero,
+        localidad,
+        municipio || 'Huejutla',
+        estado || 'Hidalgo',
+        codigo_postal,
+        pais || 'México',
+        telefono_principal,
+        correo_electronico,
+        sitio_web,
+        descripcion,
+        slogan,
         id_empresa
     ];
 
@@ -282,8 +282,8 @@ router.get('/empresa', (req, res) => {
             sitio_web 
         FROM inf_perfil_empresa 
         LIMIT 1
-    `; 
-    
+    `;
+
     db.query(query, (err, results) => {
         if (err) {
             console.error('Error al obtener los datos de la empresa:', err);
@@ -309,22 +309,22 @@ router.get('/direccion', (req, res) => {
         FROM inf_perfil_empresa 
         LIMIT 1
     `;
-    
+
     db.query(query, (err, results) => {
         if (err) {
             console.error('Error al obtener la dirección:', err);
             return res.status(500).json({ message: 'Error al obtener la dirección.' });
         }
-        
+
         if (results.length === 0) {
             return res.status(404).json({ message: 'No se encontró información de dirección.' });
         }
-        
+
         const dir = results[0];
-        
+
         // Formatear la dirección completa para mostrar
         const direccionCompleta = `${dir.calle_numero}, ${dir.localidad}, ${dir.municipio}, ${dir.estado}, C.P. ${dir.codigo_postal}, ${dir.pais}`;
-        
+
         res.status(200).json({
             direccionDesglosada: dir,
             direccionCompleta: direccionCompleta
@@ -340,11 +340,11 @@ router.get('/infoHeader', (req, res) => {
     // Obtener el día de la semana actual (Lunes, Martes, etc.)
     const today = new Date();
     const dayOfWeek = today.getDay(); // 0 es domingo, 1 es lunes, etc.
-    
+
     // Convertir el número del día a nombre en español
     const dayNames = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
     const currentDayName = dayNames[dayOfWeek];
-    
+
     // Consulta para obtener información de la empresa
     const queryEmpresa = `
         SELECT 
@@ -356,7 +356,7 @@ router.get('/infoHeader', (req, res) => {
         FROM inf_perfil_empresa 
         LIMIT 1
     `;
-    
+
     // Consulta para obtener los horarios del día actual
     const queryHorario = `
         SELECT 
@@ -367,7 +367,7 @@ router.get('/infoHeader', (req, res) => {
         WHERE dia_semana = ?
         ORDER BY hora_inicio ASC
     `;
-    
+
     // Consulta para obtener el resumen de horarios de toda la semana
     const querySemana = `
         SELECT 
@@ -378,34 +378,34 @@ router.get('/infoHeader', (req, res) => {
         GROUP BY dia_semana
         ORDER BY FIELD(dia_semana, 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo')
     `;
-    
+
     // Ejecutar consulta para obtener datos de la empresa
     db.query(queryEmpresa, (err, empresaResults) => {
         if (err) {
             console.error('Error al obtener datos de empresa:', err);
             return res.status(500).json({ message: 'Error en el servidor al obtener información de la empresa.' });
         }
-        
+
         if (empresaResults.length === 0) {
             return res.status(404).json({ message: 'No se encontró información de la empresa.' });
         }
-        
+
         const empresa = empresaResults[0];
-        
+
         // Ejecutar consulta para obtener horarios del día actual
         db.query(queryHorario, [currentDayName], (err, horarioResults) => {
             if (err) {
                 console.error('Error al obtener horarios del día:', err);
                 return res.status(500).json({ message: 'Error en el servidor al obtener horarios.' });
             }
-            
+
             // Formatear horarios de hoy
             const horariosHoy = [];
             let estaAbierto = false;
-            
+
             if (horarioResults.length > 0) {
                 estaAbierto = true; // Podría estar abierto si hay horarios para hoy
-                
+
                 horarioResults.forEach(horario => {
                     // Formatear hora (quitar segundos)
                     const inicio = horario.hora_inicio.substring(0, 5);
@@ -415,41 +415,41 @@ router.get('/infoHeader', (req, res) => {
             } else {
                 horariosHoy.push("Cerrado hoy");
             }
-            
+
             // Obtener resumen semanal de horarios
             db.query(querySemana, (err, semanaResults) => {
                 if (err) {
                     console.error('Error al obtener horarios semanales:', err);
                     return res.status(500).json({ message: 'Error en el servidor al obtener horarios semanales.' });
                 }
-                
+
                 // Determinar rango de días de trabajo y horario general
                 let diasLaborables = "";
-                
+
                 if (semanaResults.length > 0) {
                     // Verificar si los días van de lunes a viernes
                     const dias = semanaResults.map(d => d.dia_semana);
                     const hayLunes = dias.includes('Lunes');
                     const hayViernes = dias.includes('Viernes');
-                    
+
                     // Determinar si todos los días tienen el mismo horario
                     let mismoHorario = true;
                     const primerHoraMin = semanaResults[0].hora_min;
                     const primerHoraMax = semanaResults[0].hora_max;
-                    
+
                     semanaResults.forEach(dia => {
-                        if (dia.hora_min.toString() !== primerHoraMin.toString() || 
+                        if (dia.hora_min.toString() !== primerHoraMin.toString() ||
                             dia.hora_max.toString() !== primerHoraMax.toString()) {
                             mismoHorario = false;
                         }
                     });
-                    
+
                     // Si hay días continuos de lunes a viernes
-                    if (hayLunes && hayViernes && 
-                        dias.includes('Martes') && 
-                        dias.includes('Miércoles') && 
+                    if (hayLunes && hayViernes &&
+                        dias.includes('Martes') &&
+                        dias.includes('Miércoles') &&
                         dias.includes('Jueves')) {
-                        
+
                         // Si el horario es el mismo para todos los días, simplificamos
                         if (mismoHorario) {
                             const inicio = primerHoraMin.substring(0, 5);
@@ -459,30 +459,30 @@ router.get('/infoHeader', (req, res) => {
                             // Buscar el horario más amplio si son diferentes
                             let horaMinGeneral = '23:59';
                             let horaMaxGeneral = '00:00';
-                            
+
                             semanaResults.forEach(dia => {
                                 const horaMin = dia.hora_min.substring(0, 5);
                                 const horaMax = dia.hora_max.substring(0, 5);
-                                
+
                                 if (horaMin < horaMinGeneral) horaMinGeneral = horaMin;
                                 if (horaMax > horaMaxGeneral) horaMaxGeneral = horaMax;
                             });
-                            
+
                             diasLaborables = `Lun - Vie: ${horaMinGeneral} - ${horaMaxGeneral}`;
                         }
                     } else {
                         // Para días no consecutivos o si no hay lunes a viernes completos
                         // Usamos abreviaturas
                         const abreviaturas = {
-                            'Lunes': 'Lun', 
-                            'Martes': 'Mar', 
-                            'Miércoles': 'Mié', 
-                            'Jueves': 'Jue', 
-                            'Viernes': 'Vie', 
-                            'Sábado': 'Sáb', 
+                            'Lunes': 'Lun',
+                            'Martes': 'Mar',
+                            'Miércoles': 'Mié',
+                            'Jueves': 'Jue',
+                            'Viernes': 'Vie',
+                            'Sábado': 'Sáb',
                             'Domingo': 'Dom'
                         };
-                        
+
                         // Si todos tienen el mismo horario
                         if (mismoHorario) {
                             const diasAbreviados = dias.map(d => abreviaturas[d]).join(', ');
@@ -498,11 +498,11 @@ router.get('/infoHeader', (req, res) => {
                 } else {
                     diasLaborables = "Horario no disponible";
                 }
-                
+
                 // Construir la dirección completa y abreviada
                 const direccionCompleta = `${empresa.calle_numero}, ${empresa.localidad}, ${empresa.municipio}, ${empresa.estado}`;
                 const direccionCorta = `${empresa.calle_numero}, ${empresa.localidad}`;
-                
+
                 // Enviar respuesta con toda la información formateada
                 res.status(200).json({
                     direccion: direccionCompleta,
@@ -519,6 +519,77 @@ router.get('/infoHeader', (req, res) => {
         });
     });
 });
+/**
+ * Endpoint para obtener todos los horarios de atención organizados por día
+ * Proporciona información detallada para la sección de Calendario de Atención
+ */
+router.get('/horarios-atencion', (req, res) => {
+    // Nombres de los días de la semana en español
+    const diasSemana = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 
+    // Obtener la fecha actual para determinar qué día es hoy
+    const today = new Date();
+    const currentDayName = diasSemana[today.getDay() === 0 ? 6 : today.getDay() - 1]; // Ajuste: 0=domingo en JS
+
+    // Consulta para obtener los horarios agrupados por día
+    const query = `
+        SELECT 
+            dia_semana, 
+            GROUP_CONCAT(CONCAT(SUBSTRING(hora_inicio, 1, 5), ' - ', SUBSTRING(hora_fin, 1, 5)) SEPARATOR ', ') AS horarios,
+            MIN(hora_inicio) as apertura,
+            MAX(hora_fin) as cierre
+        FROM horarios 
+        GROUP BY dia_semana
+        ORDER BY FIELD(dia_semana, 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo')
+    `;
+
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener horarios:', err);
+            return res.status(500).json({ message: 'Error al obtener los horarios de atención.' });
+        }
+
+        // Crear un objeto con todos los días, incluso los que no tienen horarios (cerrados)
+        const horariosCompletos = diasSemana.map(dia => {
+            // Buscar si hay horarios para este día
+            const horarioDia = results.find(r => r.dia_semana === dia);
+
+            if (horarioDia) {
+                return {
+                    dia: dia,
+                    estado: 'abierto',
+                    horas: horarioDia.horarios,
+                    apertura: horarioDia.apertura,
+                    cierre: horarioDia.cierre,
+                    esHoy: dia === currentDayName
+                };
+            } else {
+                return {
+                    dia: dia,
+                    estado: 'cerrado',
+                    horas: 'Cerrado',
+                    apertura: null,
+                    cierre: null,
+                    esHoy: dia === currentDayName
+                };
+            }
+        });
+
+        // Verificar si hay horarios disponibles
+        if (results.length === 0) {
+            return res.status(200).json({
+                message: 'No hay horarios configurados',
+                horarios: horariosCompletos
+            });
+        }
+
+        // Devolver los horarios completos
+        res.status(200).json({
+            message: 'Horarios de atención obtenidos correctamente',
+            horarios: horariosCompletos,
+            diaActual: currentDayName
+        });
+    });
+});
 // Exportar el router
 module.exports = router;
