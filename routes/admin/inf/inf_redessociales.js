@@ -25,7 +25,7 @@ router.get('/all', (req, res) => {
     });
 });
 
-// Endpoint para obtener todas las redes sociales
+// Endpoint para obtener todas las red social
 router.get('/get', (_req, res) => {
     const query = `SELECT * FROM inf_redes_sociales ORDER BY fecha_creacion DESC`;
     db.query(query, (err, results) => {
