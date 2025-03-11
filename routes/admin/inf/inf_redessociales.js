@@ -8,6 +8,24 @@ function validateUrl(url) {
 }
 
 // Endpoint para obtener todas las redes sociales
+router.get('/all', (req, res) => {
+    const query = `SELECT * FROM redes_sociales`;
+    
+    db.query(query, (err, results) => {
+        if (err) {
+            console.error('Error al obtener redes sociales:', err);
+            return res.status(500).json({ message: 'Error en el servidor al obtener redes sociales.' });
+        }
+        
+        if (results.length === 0) {
+            return res.status(200).json([]); // Devolver arreglo vacío en lugar de error 404
+        }
+        
+        res.status(200).json(results);
+    });
+});
+
+// Endpoint para obtener todas las redes sociales
 router.get('/get', (_req, res) => {
     const query = `SELECT * FROM inf_redes_sociales ORDER BY fecha_creacion DESC`;
     db.query(query, (err, results) => {
