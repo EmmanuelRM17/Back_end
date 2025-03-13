@@ -71,14 +71,23 @@ router.post('/register', async (req, res) => {
         const lugar = xss(req.body.lugar);
         const telefono = xss(req.body.telefono);
         const email = xss(req.body.email);
-        const alergias = JSON.stringify(req.body.alergias);
+        
+        // Procesar alergias y condiciones médicas por separado
+        const alergias = JSON.stringify(req.body.alergias || []);
+        const condicionesMedicas = JSON.stringify(req.body.condicionesMedicas || []);
+        
         const password = xss(req.body.password);
         const tipoTutor = xss(req.body.tipoTutor);
         const nombreTutor = xss(req.body.nombreTutor);
 
         // Validación de campos obligatorios
-        if (!nombre || !aPaterno || !aMaterno || !fechaNacimiento || !genero || !lugar || !telefono || !email || !password) {
+        if (!nombre || !aPaterno || !aMaterno || !fechaNacimiento || !genero || !lugar || !email || !password) {
             return res.status(400).json({ message: 'Todos los campos son obligatorios' });
+        }
+
+        // Permitir que el usuario no tenga teléfono
+        if (!telefono && req.body.noTieneTelefono !== true) {
+            return res.status(400).json({ message: 'Debe proporcionar un teléfono o marcar que no tiene' });
         }
 
         // Si es menor de edad, validar datos del tutor
@@ -110,13 +119,20 @@ router.post('/register', async (req, res) => {
                         // Si el correo ya existe pero no ha completado el registro
                         const updateSql = `
                             UPDATE pacientes 
-                            SET nombre = ?, aPaterno = ?, aMaterno = ?, fechaNacimiento = ?, genero = ?, lugar = ?, telefono = ?, alergias = ?, tipoTutor = ?, nombreTutor = ?, password = ?, registro_completo = 1 
+                            SET nombre = ?, aPaterno = ?, aMaterno = ?, fechaNacimiento = ?, genero = ?, 
+                            lugar = ?, telefono = ?, alergias = ?, condiciones_medicas = ?, 
+                            tipoTutor = ?, nombreTutor = ?, password = ?, registro_completo = 1 
                             WHERE email = ?
                         `;
                         const hashedPassword = await bcrypt.hash(password, 10);
 
-                        db.query(updateSql, [nombre, aPaterno, aMaterno, fechaNacimiento, genero, lugar, telefono, alergias, tipoTutor, nombreTutor, hashedPassword, email], (err, result) => {
+                        db.query(updateSql, [
+                            nombre, aPaterno, aMaterno, fechaNacimiento, genero, 
+                            lugar, telefono, alergias, condicionesMedicas, 
+                            tipoTutor, nombreTutor, hashedPassword, email
+                        ], (err, result) => {
                             if (err) {
+                                logger.error('Error al completar el registro:', err);
                                 return res.status(500).json({ message: 'Error al completar el registro.' });
                             }
                             return res.status(200).json({ message: 'Registro completado correctamente.' });
@@ -128,10 +144,18 @@ router.post('/register', async (req, res) => {
                     const hashedPassword = await bcrypt.hash(password, saltRounds);
 
                     const insertSql = `
-                        INSERT INTO pacientes (nombre, aPaterno, aMaterno, fechaNacimiento, genero, lugar, telefono, email, alergias, tipoTutor, nombreTutor, password, registro_completo) 
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
+                        INSERT INTO pacientes (
+                            nombre, aPaterno, aMaterno, fechaNacimiento, genero, 
+                            lugar, telefono, email, alergias, condiciones_medicas, 
+                            tipoTutor, nombreTutor, password, registro_completo
+                        ) 
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     `;
-                    db.query(insertSql, [nombre, aPaterno, aMaterno, fechaNacimiento, genero, lugar, telefono, email, alergias, tipoTutor, nombreTutor, hashedPassword], (err, result) => {
+                    db.query(insertSql, [
+                        nombre, aPaterno, aMaterno, fechaNacimiento, genero, 
+                        lugar, telefono, email, alergias, condicionesMedicas, 
+                        tipoTutor, nombreTutor, hashedPassword
+                    ], (err, result) => {
                         if (err) {
                             logger.error('Error al registrar el paciente:', err);
                             return res.status(500).json({ message: 'Error al registrar el paciente.' });
@@ -149,7 +173,6 @@ router.post('/register', async (req, res) => {
         res.status(500).json({ message: 'Error en el servidor' });
     }
 });
-
 
 // Endpoint para solicitar la recuperación de contraseña
 router.post('/recuperacion', async (req, res) => {
