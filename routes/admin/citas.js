@@ -101,29 +101,37 @@ router.get("/all", async (req, res) => {
     try {
         const query = `
         SELECT 
-            id AS consulta_id,
-            paciente_id,
-            nombre AS paciente_nombre,
-            apellido_paterno AS paciente_apellido_paterno,
-            apellido_materno AS paciente_apellido_materno,
-            genero AS paciente_genero,
-            fecha_nacimiento AS paciente_fecha_nacimiento,
-            correo AS paciente_correo,
-            telefono AS paciente_telefono,
-            odontologo_id,
-            odontologo_nombre,
-            servicio_id,
-            servicio_nombre,
-            categoria_servicio,
-            precio_servicio,
-            fecha_consulta,
-            estado,
-            notas,
-            horario_id,
-            fecha_solicitud,
-            archivado
-        FROM citas
-        ORDER BY fecha_consulta DESC;
+            c.id AS consulta_id,
+            c.paciente_id,
+            c.nombre AS paciente_nombre,
+            c.apellido_paterno AS paciente_apellido_paterno,
+            c.apellido_materno AS paciente_apellido_materno,
+            c.genero AS paciente_genero,
+            c.fecha_nacimiento AS paciente_fecha_nacimiento,
+            c.correo AS paciente_correo,
+            c.telefono AS paciente_telefono,
+            c.odontologo_id,
+            c.odontologo_nombre,
+            c.servicio_id,
+            c.servicio_nombre,
+            c.categoria_servicio,
+            c.precio_servicio,
+            c.fecha_consulta,
+            c.estado,
+            c.notas,
+            c.horario_id,
+            c.fecha_solicitud,
+            c.archivado,
+            s.tratamiento AS es_tratamiento, 
+            COALESCE(COUNT(c2.id), 0) + 1 AS numero_cita_tratamiento
+        FROM citas c
+        LEFT JOIN servicios s ON c.servicio_id = s.id
+        LEFT JOIN citas c2 ON c2.paciente_id = c.paciente_id 
+                         AND c2.servicio_id = c.servicio_id 
+                         AND c2.fecha_consulta < c.fecha_consulta
+                         AND c2.archivado = FALSE
+        GROUP BY c.id
+        ORDER BY c.fecha_consulta DESC;
     `;
 
         // Ejecutar consulta con async/await
@@ -293,6 +301,44 @@ router.put('/cancel/:id', async (req, res) => {
 
     } catch (error) {
         logger.error('Error en la cancelación de cita:', error);
+        res.status(500).json({ message: 'Error interno del servidor.' });
+    }
+});
+
+// Endpoint para actualizar solo el estado de una cita
+router.put('/updateStatus/:id', async (req, res) => {
+    const { id } = req.params;
+    const { estado } = req.body;
+
+    // Validaciones
+    if (!id || isNaN(id)) {
+        return res.status(400).json({ message: 'ID de cita inválido.' });
+    }
+    
+    if (!estado || !['Pendiente', 'Confirmada', 'Cancelada', 'Completada'].includes(estado)) {
+        return res.status(400).json({ message: 'Estado de cita inválido. Los valores permitidos son: Pendiente, Confirmada, Cancelada o Completada.' });
+    }
+
+    try {
+        const updateQuery = `UPDATE citas SET estado = ? WHERE id = ?`;
+        
+        db.query(updateQuery, [xss(estado), parseInt(id)], (err, result) => {
+            if (err) {
+                logger.error('Error al actualizar el estado de la cita:', err);
+                return res.status(500).json({ message: 'Error al actualizar el estado de la cita en la base de datos.' });
+            }
+
+            if (result.affectedRows === 0) {
+                return res.status(404).json({ message: 'No se encontró la cita con el ID proporcionado.' });
+            }
+
+            res.json({ 
+                message: `Estado de la cita actualizado correctamente a "${estado}".`,
+                estado: estado
+            });
+        });
+    } catch (error) {
+        logger.error('Error en la actualización de estado de cita:', error);
         res.status(500).json({ message: 'Error interno del servidor.' });
     }
 });
