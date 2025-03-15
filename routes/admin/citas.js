@@ -35,7 +35,7 @@ router.post('/nueva', async (req, res) => {
         // 1. Verificar información del servicio
         const [serviceResult] = await db.promise().query(
             `SELECT tratamiento, citasEstimadas, duration, price, category 
-             FROM servicios WHERE id = ?`, 
+             FROM servicios WHERE id = ?`,
             [servicio_id]
         );
 
@@ -65,21 +65,20 @@ router.post('/nueva', async (req, res) => {
         }
 
         // 3. Manejo según tipo de paciente (registrado o no)
-        
+
         // CASO 1: Paciente registrado (tiene paciente_id)
         if (paciente_id) {
             // SUBCASO 1A: Tratamiento para paciente registrado
             if (isTratamiento) {
                 // Calcular fechas para el tratamiento
                 const fechaInicio = moment(fecha_hora).format('YYYY-MM-DD');
-                
-                // Calculamos fecha estimada de fin: 
-                // Si son 3 citas estimadas y son semanales, la fecha fin es 2 semanas después de la fecha inicio
+
+                // MODIFICADO: Las citas son mensuales (no semanales)
                 const fechaEstimadaFin = moment(fecha_hora)
-                    .add(citasEstimadas - 1, 'weeks')
+                    .add(citasEstimadas - 1, 'months')
                     .format('YYYY-MM-DD');
-                
-                logger.info(`Fechas del tratamiento - Inicio: ${fechaInicio}, Fin estimado: ${fechaEstimadaFin} (${citasEstimadas} citas)`);
+
+                logger.info(`Fechas del tratamiento - Inicio: ${fechaInicio}, Fin estimado: ${fechaEstimadaFin} (${citasEstimadas} citas mensuales)`);
 
                 // Crear un tratamiento
                 const [tratamientoResult] = await db.promise().query(
@@ -145,7 +144,7 @@ router.post('/nueva', async (req, res) => {
                     es_tratamiento: true,
                     estado: 'Pendiente'
                 });
-            } 
+            }
             // SUBCASO 1B: Cita normal (no tratamiento) para paciente registrado
             else {
                 // Insertar cita regular para paciente registrado
@@ -185,7 +184,7 @@ router.post('/nueva', async (req, res) => {
                 });
             }
         }
-        
+
         // CASO 2: Paciente NO registrado (no tiene paciente_id)
         else {
             // 2.1. Primero crear registro en pre_registro_citas
@@ -228,7 +227,7 @@ router.post('/nueva', async (req, res) => {
                     const fechaEstimadaFin = moment(formattedFechaHora)
                         .add(citasEstimadas - 1, 'weeks')
                         .format('YYYY-MM-DD');
-                    
+
                     logger.info(`Fechas del tratamiento (paciente no registrado) - Inicio: ${fechaInicio}, Fin estimado: ${fechaEstimadaFin}`);
 
                     // Crear tratamiento con paciente_id NULL
@@ -373,9 +372,9 @@ router.post('/nueva', async (req, res) => {
         }
     } catch (error) {
         logger.error('Error en la ruta /citas/nueva: ', error);
-        res.status(500).json({ 
-            message: 'Error en el servidor.', 
-            error: error.message 
+        res.status(500).json({
+            message: 'Error en el servidor.',
+            error: error.message
         });
     }
 });
