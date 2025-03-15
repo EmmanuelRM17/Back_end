@@ -111,8 +111,8 @@ router.post('/nueva', async (req, res) => {
                         paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
                         correo, telefono, odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
                         categoria_servicio, precio_servicio, fecha_consulta, fecha_solicitud, estado, notas, 
-                        tratamiento_id, numero_cita_tratamiento
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                        tratamiento_id, numero_cita_tratamiento, tratamiento_pendiente
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
                     [
                         parseInt(xss(paciente_id)),
                         xss(nombre),
@@ -133,7 +133,8 @@ router.post('/nueva', async (req, res) => {
                         'Pendiente',
                         notas ? xss(notas) : `Primera cita del tratamiento #${tratamientoId} (pendiente de confirmación)`,
                         tratamientoId,
-                        1 // Es la primera cita del tratamiento
+                        1, // Es la primera cita del tratamiento
+                        1  // AÑADIDO: Tratamiento pendiente = 1
                     ]
                 );
 
