@@ -5,6 +5,8 @@ const logger = require('../../utils/logger');
 const xss = require('xss'); // Para sanitización de entradas
 const moment = require('moment-timezone');
 
+// Endpoint para crear citas/tratamientos
+
 router.post('/nueva', async (req, res) => {
     const {
         paciente_id,
@@ -27,7 +29,7 @@ router.post('/nueva', async (req, res) => {
         horario_id
     } = req.body;
 
-    // Validaciones básicas con nombres correctos
+    // Validaciones básicas
     if (!nombre || !apellido_paterno || !apellido_materno || !genero || !fecha_nacimiento || !servicio_id || !fecha_hora) {
         return res.status(400).json({ message: 'Los campos obligatorios no están completos.' });
     }
@@ -36,141 +38,192 @@ router.post('/nueva', async (req, res) => {
         const formattedFechaHora = moment(fecha_hora).tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
         const formattedFechaSolicitud = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
 
-        const checkQuery = `
-            SELECT COUNT(*) as count FROM citas 
-            WHERE fecha_consulta = ? AND odontologo_id = ?
+        // Verificamos si el servicio es un tratamiento
+        const checkServiceQuery = `
+            SELECT tratamiento, citasEstimadas, duration, price 
+            FROM servicios 
+            WHERE id = ?
         `;
-        db.query(checkQuery, [formattedFechaHora, odontologo_id], (err, result) => {
+        
+        db.query(checkServiceQuery, [servicio_id], async (err, serviceResult) => {
             if (err) {
-                logger.error('Error al verificar citas duplicadas: ', err);
-                return res.status(500).json({ message: 'Error al verificar disponibilidad de citas.' });
+                logger.error('Error al verificar el tipo de servicio: ', err);
+                return res.status(500).json({ message: 'Error al verificar el tipo de servicio.' });
             }
-
-            if (result[0].count > 0) {
-                return res.status(400).json({ message: 'Ya existe una cita programada para este odontólogo en la misma fecha y hora.' });
+            
+            // Si no se encuentra el servicio
+            if (!serviceResult || serviceResult.length === 0) {
+                return res.status(404).json({ message: 'El servicio seleccionado no existe.' });
             }
-
-            // Si no hay citas duplicadas, primero verificamos si el servicio es un tratamiento
-            const checkServiceQuery = `
-                SELECT tratamiento, citasEstimadas, duration 
-                FROM servicios 
-                WHERE id = ?
+            
+            const isTratamiento = serviceResult[0].tratamiento === 1;
+            const citasEstimadas = serviceResult[0].citasEstimadas || 1;
+            const precioServicio = serviceResult[0].price || precio_servicio;
+            
+            // Verificar disponibilidad del horario (para cualquier tipo de servicio)
+            const checkQuery = `
+                SELECT COUNT(*) as count FROM citas 
+                WHERE fecha_consulta = ? AND odontologo_id = ? AND estado IN ('Confirmada', 'Pendiente')
             `;
             
-            db.query(checkServiceQuery, [servicio_id], (err, serviceResult) => {
+            db.query(checkQuery, [formattedFechaHora, odontologo_id], (err, result) => {
                 if (err) {
-                    logger.error('Error al verificar el tipo de servicio: ', err);
-                    return res.status(500).json({ message: 'Error al verificar el tipo de servicio.' });
+                    logger.error('Error al verificar disponibilidad: ', err);
+                    return res.status(500).json({ message: 'Error al verificar disponibilidad.' });
                 }
                 
-                // Si no se encuentra el servicio
-                if (!serviceResult || serviceResult.length === 0) {
-                    return res.status(404).json({ message: 'El servicio seleccionado no existe.' });
+                // Si el horario ya está ocupado, notificamos
+                if (result[0].count > 0) {
+                    return res.status(400).json({ 
+                        message: 'El horario seleccionado no está disponible para este odontólogo. Por favor, seleccione otro horario.' 
+                    });
                 }
                 
-                const isTratamiento = serviceResult[0].tratamiento === 1;
-                const citasEstimadas = serviceResult[0].citasEstimadas || 1;
-                const duration = serviceResult[0].duration || 'No especificada';
-
-                // Insertar la cita
-                const insertQuery = `
-                    INSERT INTO citas (
-                        paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
-                        correo, telefono, odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
-                        categoria_servicio, precio_servicio, fecha_consulta, fecha_solicitud, estado, notas, horario_id
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                `;
-
-                const values = [
-                    paciente_id ? parseInt(xss(paciente_id)) : null,
-                    xss(nombre),
-                    xss(apellido_paterno),
-                    xss(apellido_materno),
-                    xss(genero),
-                    xss(fecha_nacimiento),
-                    correo ? xss(correo) : '',
-                    telefono ? xss(telefono) : '',
-                    odontologo_id ? parseInt(xss(odontologo_id)) : null,
-                    xss(odontologo_nombre),
-                    parseInt(xss(servicio_id)),
-                    xss(servicio_nombre),
-                    categoria_servicio ? xss(categoria_servicio) : null,
-                    precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00,
-                    formattedFechaHora,
-                    formattedFechaSolicitud,
-                    xss(estado) || 'Pendiente',
-                    notas ? xss(notas) : null,
-                    horario_id ? parseInt(xss(horario_id)) : null
-                ];
-
-                db.query(insertQuery, values, (err, citaResult) => {
-                    if (err) {
-                        logger.error('Error al insertar cita: ', err);
-                        return res.status(500).json({ message: 'Error al registrar la cita.' });
-                    }
+                // CASO 1: Si es un tratamiento, primero creamos el tratamiento
+                if (isTratamiento) {
+                    // Calculamos fecha estimada de fin
+                    const fechaInicio = moment(fecha_hora);
+                    // Asumimos que cada cita es semanal para una estimación simple
+                    const fechaEstimadaFin = moment(fecha_hora).add(citasEstimadas - 1, 'weeks');
+                    const formattedFechaEstimadaFin = fechaEstimadaFin.format('YYYY-MM-DD');
                     
-                    const cita_id = citaResult.insertId;
+                    // Creamos un registro en tratamientos
+                    const insertTratamientoQuery = `
+                        INSERT INTO tratamientos (
+                            paciente_id, servicio_id, odontologo_id, nombre_tratamiento,
+                            fecha_inicio, fecha_estimada_fin, total_citas_programadas,
+                            citas_completadas, estado, notas, costo_total, creado_en
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                    `;
                     
-                    // Si el servicio es un tratamiento, crear entrada en la tabla tratamientos
-                    if (isTratamiento) {
-                        // Calculamos fecha estimada de fin basada en la duración o las citas estimadas
-                        const fechaInicio = moment(fecha_hora);
-                        // Asumimos que cada cita es semanal para una estimación simple
-                        const fechaEstimadaFin = moment(fecha_hora).add(citasEstimadas - 1, 'weeks');
-                        const formattedFechaEstimadaFin = fechaEstimadaFin.format('YYYY-MM-DD');
+                    const tratamientoValues = [
+                        paciente_id ? parseInt(xss(paciente_id)) : null,
+                        parseInt(xss(servicio_id)),
+                        odontologo_id ? parseInt(xss(odontologo_id)) : null,
+                        xss(servicio_nombre),
+                        formattedFechaHora.split(' ')[0], // Solo tomamos la fecha
+                        formattedFechaEstimadaFin,
+                        citasEstimadas,
+                        0, // Citas completadas inicialmente en 0
+                        'Pendiente', // Estado inicial pendiente
+                        notas ? xss(notas) : `Fecha primera cita propuesta: ${formattedFechaHora}`,
+                        precioServicio
+                    ];
+                    
+                    db.query(insertTratamientoQuery, tratamientoValues, (err, tratamientoResult) => {
+                        if (err) {
+                            logger.error('Error al crear tratamiento: ', err);
+                            return res.status(500).json({ 
+                                message: 'Error al registrar el tratamiento.', 
+                                error: err.message 
+                            });
+                        }
                         
-                        const insertTratamientoQuery = `
-                            INSERT INTO tratamientos (
-                                paciente_id, servicio_id, odontologo_id, nombre_tratamiento,
-                                fecha_inicio, fecha_estimada_fin, total_citas_programadas,
-                                citas_completadas, estado, notas, costo_total, creado_en
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
+                        const tratamientoId = tratamientoResult.insertId;
+                        
+                        // Ahora también creamos la primera cita en estado pendiente
+                        const insertCitaQuery = `
+                            INSERT INTO citas (
+                                paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
+                                correo, telefono, odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
+                                categoria_servicio, precio_servicio, fecha_consulta, fecha_solicitud, estado, notas, 
+                                tratamiento_id, numero_cita_tratamiento
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         `;
                         
-                        const tratamientoValues = [
+                        const citaValues = [
                             paciente_id ? parseInt(xss(paciente_id)) : null,
-                            parseInt(xss(servicio_id)),
+                            xss(nombre),
+                            xss(apellido_paterno),
+                            xss(apellido_materno),
+                            xss(genero),
+                            xss(fecha_nacimiento),
+                            correo ? xss(correo) : '',
+                            telefono ? xss(telefono) : '',
                             odontologo_id ? parseInt(xss(odontologo_id)) : null,
+                            xss(odontologo_nombre),
+                            parseInt(xss(servicio_id)),
                             xss(servicio_nombre),
-                            formattedFechaHora.split(' ')[0], // Solo tomamos la fecha
-                            formattedFechaEstimadaFin,
-                            citasEstimadas,
-                            0, // Citas completadas inicialmente en 0
-                            'Pendiente', // Estado inicial pendiente
-                            notas ? xss(notas) : null,
-                            precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00
+                            categoria_servicio ? xss(categoria_servicio) : null,
+                            precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00,
+                            formattedFechaHora,
+                            formattedFechaSolicitud,
+                            'Pendiente', // La cita también está pendiente hasta que el odontólogo confirme el tratamiento
+                            notas ? xss(notas) : `Primera cita del tratamiento #${tratamientoId} (pendiente de confirmación)`,
+                            tratamientoId, // Relacionamos la cita con el tratamiento
+                            1 // Es la primera cita del tratamiento
                         ];
                         
-                        db.query(insertTratamientoQuery, tratamientoValues, (err, tratamientoResult) => {
+                        db.query(insertCitaQuery, citaValues, (err, citaResult) => {
                             if (err) {
-                                logger.error('Error al crear tratamiento: ', err);
-                                // Continuamos aunque haya error en tratamiento
+                                logger.error('Error al insertar cita inicial para tratamiento: ', err);
                                 return res.status(201).json({ 
-                                    message: 'Cita creada correctamente, pero hubo un error al registrar el tratamiento.',
-                                    cita_id: cita_id,
-                                    error_tratamiento: true
+                                    message: 'Tratamiento registrado, pero hubo un error al registrar la cita inicial.',
+                                    tratamiento_id: tratamientoId,
+                                    es_tratamiento: true,
+                                    error_cita: true
                                 });
                             }
                             
                             res.status(201).json({ 
-                                message: 'Cita creada correctamente y tratamiento registrado.',
-                                cita_id: cita_id,
-                                tratamiento_id: tratamientoResult.insertId,
-                                es_tratamiento: true
+                                message: 'Tratamiento registrado correctamente. Un odontólogo revisará y confirmará tu solicitud.',
+                                tratamiento_id: tratamientoId,
+                                cita_id: citaResult.insertId,
+                                es_tratamiento: true,
+                                estado: 'Pendiente'
                             });
                         });
-                    } else {
-                        // Si no es un tratamiento, solo respondemos con la cita creada
+                    });
+                } 
+                // CASO 2: Si es un servicio regular (no tratamiento)
+                else {
+                    // Insertamos directamente en la tabla de citas sin relación a tratamiento
+                    const insertQuery = `
+                        INSERT INTO citas (
+                            paciente_id, nombre, apellido_paterno, apellido_materno, genero, fecha_nacimiento,
+                            correo, telefono, odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
+                            categoria_servicio, precio_servicio, fecha_consulta, fecha_solicitud, estado, notas, horario_id,
+                            tratamiento_id, numero_cita_tratamiento
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL)
+                    `;
+                    
+                    const values = [
+                        paciente_id ? parseInt(xss(paciente_id)) : null,
+                        xss(nombre),
+                        xss(apellido_paterno),
+                        xss(apellido_materno),
+                        xss(genero),
+                        xss(fecha_nacimiento),
+                        correo ? xss(correo) : '',
+                        telefono ? xss(telefono) : '',
+                        odontologo_id ? parseInt(xss(odontologo_id)) : null,
+                        xss(odontologo_nombre),
+                        parseInt(xss(servicio_id)),
+                        xss(servicio_nombre),
+                        categoria_servicio ? xss(categoria_servicio) : null,
+                        precio_servicio ? parseFloat(xss(precio_servicio)) : 0.00,
+                        formattedFechaHora,
+                        formattedFechaSolicitud,
+                        xss(estado) || 'Pendiente',
+                        notas ? xss(notas) : null,
+                        horario_id ? parseInt(xss(horario_id)) : null
+                    ];
+                    
+                    db.query(insertQuery, values, (err, citaResult) => {
+                        if (err) {
+                            logger.error('Error al insertar cita: ', err);
+                            return res.status(500).json({ message: 'Error al registrar la cita.' });
+                        }
+                        
                         res.status(201).json({ 
                             message: 'Cita creada correctamente.',
-                            cita_id: cita_id,
+                            cita_id: citaResult.insertId,
                             es_tratamiento: false
                         });
-                    }
-                });
+                    });
+                }
             });
         });
-
     } catch (error) {
         logger.error('Error en la ruta /citas/nueva: ', error);
         res.status(500).json({ message: 'Error en el servidor.' });
