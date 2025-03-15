@@ -48,6 +48,7 @@ app.use(express.json());
 const userRoutes = require("./routes/userRoutes");
 const Registrer = require("./routes/registrer");
 const Citas = require("./routes/admin/citas")
+const Tratamientos = require("./routes/admin/tratamientos.js")
 
 const politicasRoutes = require("./routes/admin/inf/inf_politicasRoutes");
 const deslindeRoutes = require("./routes/admin/inf/inf_deslindelegal");
@@ -73,7 +74,8 @@ const p_perfil = require("./routes/pacientes/perfil")
 // Asignar rutas
 app.use("/api", Registrer);
 app.use("/api/users", userRoutes);
-app.use("/api/citas", Citas)
+app.use("/api/citas", Citas);
+app.use("/api/tratamientos", Tratamientos);
 
 //administrador
 app.use("/api/politicas", politicasRoutes);
@@ -82,7 +84,7 @@ app.use("/api/termiCondicion", terminosRoutes);
 app.use("/api/perfilEmpresa", perfil_empresa);
 app.use("/api/redesSociales", redes);
 app.use("/api/reportes", reportes);
-app.use("/api/servicios", servicios)
+app.use("/api/servicios", servicios);
 app.use('/api/imagenes', imagenesRoutes);
 app.use("/api/preguntas", preguntas);
 app.use("/api/contacto",contactanos);
@@ -96,7 +98,7 @@ app.use("/api/empleados", Empleados);
 app.use("/api/horarios", Horarios);
 
 //pacientes
-app.use("/api/pacientes", paciente)
+app.use("/api/pacientes", paciente);
 app.use("/api/profile", p_perfil);
 
 app.listen(3001, () => {
