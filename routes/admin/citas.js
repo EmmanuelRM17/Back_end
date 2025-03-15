@@ -224,8 +224,8 @@ router.post('/nueva', async (req, res) => {
                 try {
                     // Calcular fechas para el tratamiento
                     const fechaInicio = moment(formattedFechaHora).format('YYYY-MM-DD');
-                    const fechaEstimadaFin = moment(formattedFechaHora)
-                        .add(citasEstimadas - 1, 'weeks')
+                    const fechaEstimadaFin = moment(fecha_hora)
+                        .add(citasEstimadas - 1, 'months')  // Correcto
                         .format('YYYY-MM-DD');
 
                     logger.info(`Fechas del tratamiento (paciente no registrado) - Inicio: ${fechaInicio}, Fin estimado: ${fechaEstimadaFin}`);
@@ -378,6 +378,7 @@ router.post('/nueva', async (req, res) => {
         });
     }
 });
+
 // Endpoint para confirmar solicitudes de pre-registro
 router.put('/confirmar-pre-registro/:id', async (req, res) => {
     const { id } = req.params;
@@ -488,7 +489,7 @@ router.put('/confirmar-pre-registro/:id', async (req, res) => {
                 const citasEstimadas = servicioResult[0]?.citasEstimadas || 1;
 
                 const fechaEstimadaFin = moment(preRegistro.fecha_hora)
-                    .add(citasEstimadas - 1, 'weeks')
+                    .add(citasEstimadas - 1, 'months')  // Correcto
                     .format('YYYY-MM-DD');
 
                 // Crear un tratamiento
