@@ -1,4 +1,9 @@
-
+/**
+ * Router para gestionar la API de tratamientos dentales
+ * 
+ * Este módulo maneja todas las operaciones relacionadas con tratamientos,
+ * incluyendo la creación, consulta, actualización y manejo de estados.
+ */
 
 const express = require('express');
 const db = require('../../db');
@@ -13,7 +18,7 @@ const moment = require('moment-timezone');
  */
 router.get("/all", async (req, res) => {
     try {
-        // Consulta que incluye información detallada del tratamiento, paciente y odontólogo
+        // Consulta que incluye información detallada del tratamiento, paciente y empleado (odontólogo)
         const query = `
             SELECT 
                 t.id,
@@ -31,14 +36,14 @@ router.get("/all", async (req, res) => {
                 t.creado_en,
                 t.actualizado_en,
                 p.nombre AS paciente_nombre,
-                p.apellido_paterno AS paciente_apellido_paterno,
-                p.apellido_materno AS paciente_apellido_materno,
-                o.nombre AS odontologo_nombre,
+                p.aPaterno AS paciente_apellido_paterno,
+                p.aMaterno AS paciente_apellido_materno,
+                e.nombre AS odontologo_nombre,
                 s.title AS servicio_nombre,
                 s.category AS categoria_servicio
             FROM tratamientos t
             LEFT JOIN pacientes p ON t.paciente_id = p.id
-            LEFT JOIN odontologos o ON t.odontologo_id = o.id
+            LEFT JOIN empleados e ON t.odontologo_id = e.id
             LEFT JOIN servicios s ON t.servicio_id = s.id
             ORDER BY t.creado_en DESC
         `;
@@ -82,14 +87,14 @@ router.get("/:id", async (req, res) => {
                 t.creado_en,
                 t.actualizado_en,
                 p.nombre AS paciente_nombre,
-                p.apellido_paterno AS paciente_apellido_paterno,
-                p.apellido_materno AS paciente_apellido_materno,
-                o.nombre AS odontologo_nombre,
+                p.aPaterno AS paciente_apellido_paterno,
+                p.aMaterno AS paciente_apellido_materno,
+                e.nombre AS odontologo_nombre,
                 s.title AS servicio_nombre,
                 s.category AS categoria_servicio
             FROM tratamientos t
             LEFT JOIN pacientes p ON t.paciente_id = p.id
-            LEFT JOIN odontologos o ON t.odontologo_id = o.id
+            LEFT JOIN empleados e ON t.odontologo_id = e.id
             LEFT JOIN servicios s ON t.servicio_id = s.id
             WHERE t.id = ?
         `;
@@ -151,6 +156,18 @@ router.post('/nuevo', async (req, res) => {
     }
 
     try {
+        // Verificar que el empleado (odontólogo) existe
+        if (odontologo_id) {
+            const [empleado] = await db.promise().query(
+                'SELECT * FROM empleados WHERE id = ? AND puesto = "Odontólogo"', 
+                [odontologo_id]
+            );
+            
+            if (empleado.length === 0) {
+                return res.status(400).json({ message: 'El empleado seleccionado no existe o no es odontólogo.' });
+            }
+        }
+
         const fechaInicio = moment(fecha_inicio).tz('America/Mexico_City').format('YYYY-MM-DD');
         const fechaEstimadaFin = moment(fecha_estimada_fin).tz('America/Mexico_City').format('YYYY-MM-DD');
         const fechaCreacion = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
@@ -245,6 +262,18 @@ router.put('/update/:id', async (req, res) => {
             return res.status(400).json({ 
                 message: 'El total de citas programadas no puede ser menor que el número de citas ya completadas.'
             });
+        }
+
+        // Si se proporciona un ID de odontólogo, verificar que existe y es odontólogo
+        if (odontologo_id) {
+            const [empleado] = await db.promise().query(
+                'SELECT * FROM empleados WHERE id = ? AND puesto = "Odontólogo"', 
+                [odontologo_id]
+            );
+            
+            if (empleado.length === 0) {
+                return res.status(400).json({ message: 'El empleado seleccionado no existe o no es odontólogo.' });
+            }
         }
 
         const fechaActualizacion = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
@@ -536,11 +565,13 @@ router.post('/:id/agregarCita', async (req, res) => {
         // Obtener información del tratamiento
         const [tratamiento] = await db.promise().query(
             `SELECT t.*, 
-                    p.nombre, p.apellido_paterno, p.apellido_materno, p.genero, p.fecha_nacimiento, p.correo, p.telefono,
-                    s.title, s.category, s.price, s.tratamiento AS es_tratamiento
+                    p.nombre, p.aPaterno, p.aMaterno, p.genero, p.fecha_nacimiento, p.email, p.telefono,
+                    s.title, s.category, s.price, s.tratamiento AS es_tratamiento,
+                    e.nombre AS odontologo_nombre
              FROM tratamientos t
              JOIN pacientes p ON t.paciente_id = p.id
              JOIN servicios s ON t.servicio_id = s.id
+             LEFT JOIN empleados e ON t.odontologo_id = e.id
              WHERE t.id = ?`, 
             [id]
         );
@@ -589,6 +620,22 @@ router.post('/:id/agregarCita', async (req, res) => {
             });
         }
 
+        // Si se especificó un odontólogo diferente, verificar que existe y es odontólogo
+        let nombreOdontologo = tratamiento[0].odontologo_nombre || '';
+        
+        if (odontologo_id && odontologo_id !== tratamiento[0].odontologo_id) {
+            const [empleado] = await db.promise().query(
+                'SELECT nombre FROM empleados WHERE id = ? AND puesto = "Odontólogo"',
+                [odontologo_id]
+            );
+            
+            if (empleado.length === 0) {
+                return res.status(400).json({ message: 'El empleado seleccionado no existe o no es odontólogo.' });
+            }
+            
+            nombreOdontologo = empleado[0].nombre;
+        }
+
         // Insertar la nueva cita
         const insertQuery = `
             INSERT INTO citas (
@@ -615,29 +662,14 @@ router.post('/:id/agregarCita', async (req, res) => {
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `;
 
-        // Obtener nombre del odontólogo si se proporciona un ID distinto
-        let nombreOdontologo = '';
-        if (odontologo_id && odontologo_id !== tratamiento[0].odontologo_id) {
-            const [odontologo] = await db.promise().query(
-                'SELECT nombre FROM odontologos WHERE id = ?',
-                [odontologo_id]
-            );
-            if (odontologo.length > 0) {
-                nombreOdontologo = odontologo[0].nombre;
-            }
-        } else {
-            // Usar el odontólogo del tratamiento
-            nombreOdontologo = tratamiento[0].odontologo_nombre || '';
-        }
-
         const values = [
             tratamiento[0].paciente_id,
             tratamiento[0].nombre,
-            tratamiento[0].apellido_paterno,
-            tratamiento[0].apellido_materno,
+            tratamiento[0].aPaterno,
+            tratamiento[0].aMaterno,
             tratamiento[0].genero,
             tratamiento[0].fecha_nacimiento,
-            tratamiento[0].correo || '',
+            tratamiento[0].email || '',
             tratamiento[0].telefono || '',
             odontologo_id || tratamiento[0].odontologo_id,
             nombreOdontologo,
