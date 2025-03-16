@@ -75,7 +75,7 @@ router.post('/nueva', async (req, res) => {
 
                 // MODIFICADO: Las citas son mensuales (no semanales)
                 const fechaEstimadaFin = moment(fecha_hora)
-                    .add(citasEstimadas - 1, 'months')
+                    .add(citasEstimadas, 'months')
                     .format('YYYY-MM-DD');
 
                 logger.info(`Fechas del tratamiento - Inicio: ${fechaInicio}, Fin estimado: ${fechaEstimadaFin} (${citasEstimadas} citas mensuales)`);
@@ -226,7 +226,7 @@ router.post('/nueva', async (req, res) => {
                     // Calcular fechas para el tratamiento
                     const fechaInicio = moment(formattedFechaHora).format('YYYY-MM-DD');
                     const fechaEstimadaFin = moment(fecha_hora)
-                        .add(citasEstimadas - 1, 'months')  // Correcto
+                        .add(citasEstimadas, 'months')  // Correcto
                         .format('YYYY-MM-DD');
 
                     logger.info(`Fechas del tratamiento (paciente no registrado) - Inicio: ${fechaInicio}, Fin estimado: ${fechaEstimadaFin}`);
@@ -490,7 +490,7 @@ router.put('/confirmar-pre-registro/:id', async (req, res) => {
                 const citasEstimadas = servicioResult[0]?.citasEstimadas || 1;
 
                 const fechaEstimadaFin = moment(preRegistro.fecha_hora)
-                    .add(citasEstimadas - 1, 'months')  // Correcto
+                    .add(citasEstimadas, 'months')  // Correcto
                     .format('YYYY-MM-DD');
 
                 // Crear un tratamiento
