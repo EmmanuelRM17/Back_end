@@ -426,7 +426,7 @@ router.put('/updateStatus/:id', async (req, res) => {
 });
 
 /**
- * Incrementar contador de citas completadas para un tratamiento
+ * Incrementar contador de citas completadas para un tratamiento y programar la siguiente
  * PUT /api/tratamientos/incrementarCitas/:id
  */
 router.put('/incrementarCitas/:id', async (req, res) => {
@@ -501,6 +501,93 @@ router.put('/incrementarCitas/:id', async (req, res) => {
 
         const estaCompleto = tratamientoActualizado[0].citas_completadas >= tratamientoActualizado[0].total_citas_programadas;
 
+        // Si el tratamiento NO está completo, programar la siguiente cita
+        if (!estaCompleto) {
+            // Obtener todos los detalles de la cita actual
+            const [citaDetallada] = await db.promise().query(
+                'SELECT * FROM citas WHERE id = ?', 
+                [cita_id]
+            );
+            
+            if (citaDetallada.length > 0) {
+                // Calcular la fecha para la próxima cita (un mes después)
+                const fechaActual = new Date(citaDetallada[0].fecha_consulta);
+                const fechaSiguiente = new Date(fechaActual);
+                fechaSiguiente.setMonth(fechaSiguiente.getMonth() + 1);
+                
+                // Crear la siguiente cita con el mismo horario pero un mes después
+                const numeroCitaSiguiente = tratamientoActualizado[0].citas_completadas + 1;
+                
+                const insertCitaQuery = `
+                    INSERT INTO citas (
+                        paciente_id, 
+                        nombre, 
+                        apellido_paterno, 
+                        apellido_materno, 
+                        genero, 
+                        fecha_nacimiento,
+                        correo, 
+                        telefono, 
+                        odontologo_id, 
+                        odontologo_nombre, 
+                        servicio_id, 
+                        servicio_nombre,
+                        categoria_servicio, 
+                        precio_servicio, 
+                        fecha_consulta, 
+                        fecha_solicitud, 
+                        estado, 
+                        notas, 
+                        tratamiento_id,
+                        numero_cita_tratamiento
+                    ) 
+                    SELECT
+                        paciente_id, 
+                        nombre, 
+                        apellido_paterno, 
+                        apellido_materno, 
+                        genero, 
+                        fecha_nacimiento,
+                        correo, 
+                        telefono, 
+                        odontologo_id, 
+                        odontologo_nombre, 
+                        servicio_id, 
+                        servicio_nombre,
+                        categoria_servicio, 
+                        precio_servicio, 
+                        ?, -- nueva fecha 
+                        NOW(), -- fecha de solicitud actual
+                        'Pendiente', -- estado inicial
+                        'Cita programada automáticamente después de completar cita anterior.', 
+                        tratamiento_id,
+                        ? -- nuevo número de cita
+                    FROM citas
+                    WHERE id = ?
+                `;
+                
+                const [nuevaCita] = await db.promise().query(insertCitaQuery, [
+                    moment(fechaSiguiente).format('YYYY-MM-DD HH:mm:ss'),
+                    numeroCitaSiguiente,
+                    cita_id
+                ]);
+                
+                // Respuesta con información de la siguiente cita
+                return res.json({ 
+                    message: 'Contador de citas completadas incrementado correctamente.',
+                    citas_completadas: tratamientoActualizado[0].citas_completadas,
+                    tratamiento_completado: estaCompleto,
+                    estado: tratamientoActualizado[0].estado,
+                    siguiente_cita: {
+                        cita_id: nuevaCita.insertId,
+                        numero_cita: numeroCitaSiguiente,
+                        fecha: moment(fechaSiguiente).format('YYYY-MM-DD HH:mm:ss')
+                    }
+                });
+            }
+        }
+        
+        // Respuesta sin siguiente cita (cuando el tratamiento está completo)
         res.json({ 
             message: 'Contador de citas completadas incrementado correctamente.',
             citas_completadas: tratamientoActualizado[0].citas_completadas,
