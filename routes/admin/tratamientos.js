@@ -11,7 +11,7 @@ const moment = require('moment-timezone');
  */
 router.get("/all", async (req, res) => {
     try {
-        // Consulta que incluye información detallada del tratamiento, paciente y empleado (odontólogo)
+        // Consulta modificada para incluir información de pre_registro cuando no hay paciente
         const query = `
             SELECT 
                 t.id,
@@ -28,14 +28,17 @@ router.get("/all", async (req, res) => {
                 t.costo_total,
                 t.creado_en,
                 t.actualizado_en,
-                p.nombre AS paciente_nombre,
-                p.aPaterno AS paciente_apellido_paterno,
-                p.aMaterno AS paciente_apellido_materno,
+                t.pre_registro_id,
+                -- Usar información del paciente si existe, de lo contrario usar pre_registro
+                COALESCE(p.nombre, pr.nombre) AS paciente_nombre,
+                COALESCE(p.aPaterno, pr.aPaterno) AS paciente_apellido_paterno,
+                COALESCE(p.aMaterno, pr.aMaterno) AS paciente_apellido_materno,
                 e.nombre AS odontologo_nombre,
                 s.title AS servicio_nombre,
                 s.category AS categoria_servicio
             FROM tratamientos t
             LEFT JOIN pacientes p ON t.paciente_id = p.id
+            LEFT JOIN pre_registro_citas pr ON t.pre_registro_id = pr.id
             LEFT JOIN empleados e ON t.odontologo_id = e.id
             LEFT JOIN servicios s ON t.servicio_id = s.id
             ORDER BY t.creado_en DESC
@@ -318,9 +321,9 @@ router.put('/updateStatus/:id', async (req, res) => {
         return res.status(400).json({ message: 'ID de tratamiento inválido.' });
     }
     
-    if (!estado || !['Activo', 'Finalizado', 'Abandonado'].includes(estado)) {
+    if (!estado || !['Pre-Registro', 'Pendiente', 'Activo', 'Finalizado', 'Abandonado'].includes(estado)) {
         return res.status(400).json({ 
-            message: 'Estado de tratamiento inválido. Los valores permitidos son: Activo, Finalizado o Abandonado.' 
+            message: 'Estado de tratamiento inválido. Los valores permitidos son: Pre-Registro, Pendiente, Activo, Finalizado o Abandonado.' 
         });
     }
 
@@ -342,17 +345,22 @@ router.put('/updateStatus/:id', async (req, res) => {
             return res.status(400).json({ message: `El tratamiento ya se encuentra en estado "${estado}".` });
         }
         
+        // Validar transiciones de estado permitidas
         if (estadoActual === 'Finalizado' || estadoActual === 'Abandonado') {
             return res.status(400).json({ 
                 message: `No se puede cambiar el estado del tratamiento porque ya está en estado "${estadoActual}".` 
             });
         }
         
+        // Validaciones específicas para ciertos cambios de estado
         if (estado === 'Finalizado' && tratamientoActual[0].citas_completadas < tratamientoActual[0].total_citas_programadas) {
             return res.status(400).json({ 
                 message: 'No se puede finalizar el tratamiento porque aún no se han completado todas las citas programadas.' 
             });
         }
+
+        // Si cambiamos a Activo desde Pre-Registro o Pendiente, necesitamos activar también la primera cita
+        let activarPrimeraCita = (estadoActual === 'Pre-Registro' || estadoActual === 'Pendiente') && estado === 'Activo';
 
         const fechaActualizacion = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
         
@@ -382,6 +390,18 @@ router.put('/updateStatus/:id', async (req, res) => {
 
         await db.promise().query(updateQuery, values);
 
+        // Si cambiamos a estado Activo, actualizar la primera cita asociada a este tratamiento
+        if (activarPrimeraCita) {
+            const updateCitaQuery = `
+                UPDATE citas 
+                SET estado = 'Confirmada', 
+                    notas = CONCAT(IFNULL(notas, ''), '\n\nCita confirmada automáticamente al activar el tratamiento.')
+                WHERE tratamiento_id = ? AND numero_cita_tratamiento = 1
+            `;
+            
+            await db.promise().query(updateCitaQuery, [parseInt(id)]);
+        }
+        
         // Si el tratamiento se marcó como abandonado, cancelar todas las citas pendientes
         if (estado === 'Abandonado') {
             const updateCitasQuery = `
