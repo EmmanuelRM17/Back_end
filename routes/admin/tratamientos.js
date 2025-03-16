@@ -800,9 +800,8 @@ router.post('/:id/agregarCita', async (req, res) => {
 });
 
 // Endpoint para confirmar un tratamiento y actualizar su primera cita
-
 router.put('/confirmar/:id', async (req, res) => {
-    const { id } = req.params; // ID del tratamiento
+    const { id } = req.params;
     const { observaciones } = req.body; 
 
     // Validaciones básicas
@@ -819,109 +818,88 @@ router.put('/confirmar/:id', async (req, res) => {
             WHERE t.id = ? AND t.estado = 'Pendiente'
         `;
 
-        db.query(getTratamientoQuery, [id], (err, tratamientoResult) => {
-            if (err) {
-                logger.error('Error al obtener información del tratamiento:', err);
-                return res.status(500).json({ message: 'Error al procesar la solicitud.' });
-            }
-
-            if (!tratamientoResult || tratamientoResult.length === 0) {
-                return res.status(404).json({ message: 'Tratamiento no encontrado o ya no está pendiente.' });
-            }
-
-            const tratamiento = tratamientoResult[0];
-
-            // 2. Buscar si ya existe una cita vinculada a este tratamiento
-            const getCitaQuery = `
-                SELECT * FROM citas 
-                WHERE tratamiento_id = ? AND numero_cita_tratamiento = 1
-                ORDER BY id DESC LIMIT 1
-            `;
-
-            db.query(getCitaQuery, [id], (err, citaResult) => {
-                if (err) {
-                    logger.error('Error al obtener información de la cita:', err);
-                    return res.status(500).json({ message: 'Error al procesar la solicitud.' });
-                }
-
-                // Si no hay cita vinculada, es un error 
-                if (!citaResult || citaResult.length === 0) {
-                    return res.status(404).json({ 
-                        message: 'No se encontró la cita inicial relacionada con este tratamiento.' 
-                    });
-                }
-
-                const cita = citaResult[0];
-
-                // 3. Verificar que el horario siga disponible (excepto para esta misma cita)
-                const checkDisponibilidadQuery = `
-                    SELECT COUNT(*) as count FROM citas 
-                    WHERE fecha_consulta = ? AND odontologo_id = ? 
-                    AND id != ? AND estado IN ('Confirmada', 'Pendiente')
-                `;
-
-                db.query(checkDisponibilidadQuery, [cita.fecha_consulta, cita.odontologo_id, cita.id], (err, disponibilidadResult) => {
-                    if (err) {
-                        logger.error('Error al verificar disponibilidad:', err);
-                        return res.status(500).json({ message: 'Error al verificar disponibilidad.' });
-                    }
-
-                    // Si el horario ya no está disponible (otra cita lo está usando)
-                    if (disponibilidadResult[0].count > 0) {
-                        return res.status(409).json({ 
-                            message: 'El horario ya no está disponible. Por favor, asigne un nuevo horario para esta cita.',
-                            conflicto_horario: true
-                        });
-                    }
-
-                    // 4. Actualizar estado del tratamiento a "Confirmado"
-                    const updateTratamientoQuery = `
-                        UPDATE tratamientos 
-                        SET estado = 'Activo', 
-                            notas = CONCAT(IFNULL(notas, ''), '\n', ?),
-                            actualizado_en = NOW()
-                        WHERE id = ?
-                    `;
-
-                    const notaConfirmacion = `[${moment().format('YYYY-MM-DD HH:mm')}] Tratamiento confirmado y activado. ${observaciones || ''}`;
-                    
-                    db.query(updateTratamientoQuery, [notaConfirmacion, id], (err) => {
-                        if (err) {
-                            logger.error('Error al actualizar el tratamiento:', err);
-                            return res.status(500).json({ message: 'Error al confirmar el tratamiento.' });
-                        }
-
-                        // 5. Actualizar el estado de la cita a "Confirmada"
-                        const updateCitaQuery = `
-                            UPDATE citas 
-                            SET estado = 'Confirmada', 
-                                notas = CONCAT(IFNULL(notas, ''), '\n', ?)
-                            WHERE id = ?
-                        `;
-
-                        const notaCita = `[${moment().format('YYYY-MM-DD HH:mm')}] Cita confirmada como parte del tratamiento #${id}. ${observaciones || ''}`;
-                        
-                        db.query(updateCitaQuery, [notaCita, cita.id], (err) => {
-                            if (err) {
-                                logger.error('Error al actualizar la cita:', err);
-                                return res.status(200).json({ 
-                                    message: 'Tratamiento confirmado, pero hubo un error al actualizar la cita.',
-                                    tratamiento_id: id,
-                                    tratamiento_confirmado: true,
-                                    error_cita: true
-                                });
-                            }
-
-                            res.status(200).json({
-                                message: 'Tratamiento y primera cita confirmados correctamente.',
-                                tratamiento_id: id,
-                                cita_id: cita.id,
-                                fecha_cita: cita.fecha_consulta
-                            });
-                        });
-                    });
-                });
+        const [tratamientoResult] = await db.promise().query(getTratamientoQuery, [id]);
+        
+        if (tratamientoResult.length === 0) {
+            return res.status(404).json({ 
+                message: 'Tratamiento no encontrado o no está en estado Pendiente.' 
             });
+        }
+
+        const tratamiento = tratamientoResult[0];
+
+        // 2. Buscar si ya existe una cita vinculada a este tratamiento
+        const getCitaQuery = `
+            SELECT * FROM citas 
+            WHERE tratamiento_id = ? AND numero_cita_tratamiento = 1
+            ORDER BY id DESC LIMIT 1
+        `;
+
+        const [citaResult] = await db.promise().query(getCitaQuery, [id]);
+        
+        // Si no hay cita vinculada, es un error 
+        if (citaResult.length === 0) {
+            return res.status(404).json({ 
+                message: 'No se encontró la cita inicial relacionada con este tratamiento.' 
+            });
+        }
+
+        const cita = citaResult[0];
+
+        // 3. Verificar que el horario siga disponible (excepto para esta misma cita)
+        const checkDisponibilidadQuery = `
+            SELECT COUNT(*) as count FROM citas 
+            WHERE fecha_consulta = ? AND odontologo_id = ? 
+            AND id != ? AND estado IN ('Confirmada', 'Pendiente')
+        `;
+
+        const [disponibilidadResult] = await db.promise().query(
+            checkDisponibilidadQuery, 
+            [cita.fecha_consulta, cita.odontologo_id, cita.id]
+        );
+
+        // Si el horario ya no está disponible (otra cita lo está usando)
+        if (disponibilidadResult[0].count > 0) {
+            return res.status(409).json({ 
+                message: 'El horario ya no está disponible. Por favor, asigne un nuevo horario para esta cita.',
+                conflicto_horario: true
+            });
+        }
+
+        // 4. Actualizar estado del tratamiento a "Activo"
+        const updateTratamientoQuery = `
+            UPDATE tratamientos 
+            SET estado = 'Activo', 
+                notas = CONCAT(IFNULL(notas, ''), '\n', ?),
+                actualizado_en = NOW()
+            WHERE id = ?
+        `;
+
+        const notaConfirmacion = `[${moment().format('YYYY-MM-DD HH:mm')}] Tratamiento confirmado y activado. ${observaciones || ''}`;
+        
+        await db.promise().query(updateTratamientoQuery, [notaConfirmacion, id]);
+
+        // 5. Actualizar el estado de la cita a "Confirmada"
+        const updateCitaQuery = `
+            UPDATE citas 
+            SET estado = 'Confirmada', 
+                notas = CONCAT(IFNULL(notas, ''), '\n', ?),
+                tratamiento_pendiente = 0
+            WHERE id = ?
+        `;
+
+        const notaCita = `[${moment().format('YYYY-MM-DD HH:mm')}] Cita confirmada como parte del tratamiento #${id}. ${observaciones || ''}`;
+        
+        await db.promise().query(updateCitaQuery, [notaCita, cita.id]);
+
+        // 6. Responder con éxito
+        res.status(200).json({
+            message: 'Tratamiento activado y primera cita confirmada correctamente.',
+            tratamiento_id: id,
+            tratamiento_estado: 'Activo',
+            cita_id: cita.id,
+            cita_estado: 'Confirmada',
+            fecha_cita: cita.fecha_consulta
         });
     } catch (error) {
         logger.error('Error en la confirmación de tratamiento:', error);
