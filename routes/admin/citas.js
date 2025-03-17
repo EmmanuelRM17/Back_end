@@ -1061,7 +1061,6 @@ function validarTransicionEstado(estadoActual, nuevoEstado) {
     return false;
 }
 
-// Reemplaza la función incrementarCitas con esta versión corregida
 router.put('/incrementarCitas/:id', async (req, res) => {
     const { id } = req.params; // ID del tratamiento
     const { cita_id } = req.body; // ID de la cita que se completó (consulta_id)
