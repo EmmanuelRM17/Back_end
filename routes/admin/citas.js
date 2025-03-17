@@ -1096,6 +1096,7 @@ router.put('/incrementarCitas/:id', async (req, res) => {
             'SELECT * FROM citas WHERE id = ? AND tratamiento_id = ?', 
             [cita_id, id]
         );
+        
 
         if (cita.length === 0) {
             return res.status(404).json({ 
