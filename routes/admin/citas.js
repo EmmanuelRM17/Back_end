@@ -1339,8 +1339,9 @@ router.put('/incrementarCitas/:id', async (req, res) => {
 });
 
 router.post('/actualizarProgreso', async (req, res) => {
-    const { tratamiento_id, cita_id, incluir_siguiente_cita = true } = req.body;
+    const { tratamiento_id, cita_id } = req.body;
     
+    // Validaciones básicas
     if (!tratamiento_id || isNaN(tratamiento_id)) {
         return res.status(400).json({ 
             success: false, 
@@ -1355,10 +1356,10 @@ router.post('/actualizarProgreso', async (req, res) => {
         });
     }
     
-    console.log(`Iniciando actualización directa del tratamiento ${tratamiento_id} y cita ${cita_id}`);
+    console.log(`[PROGRESO] Actualizando tratamiento ${tratamiento_id}, cita ${cita_id}`);
     
     try {
-        // 1. Obtener información del tratamiento actual
+        // 1. Obtener información del tratamiento
         const [tratamientos] = await db.promise().query(
             'SELECT * FROM tratamientos WHERE id = ?',
             [tratamiento_id]
@@ -1372,8 +1373,14 @@ router.post('/actualizarProgreso', async (req, res) => {
         }
         
         const tratamiento = tratamientos[0];
-        console.log("Información del tratamiento:", JSON.stringify(tratamiento));
+        console.log("[PROGRESO] Datos tratamiento:", JSON.stringify({
+            id: tratamiento.id,
+            estado: tratamiento.estado,
+            citas_completadas: tratamiento.citas_completadas,
+            total_citas_programadas: tratamiento.total_citas_programadas
+        }));
         
+        // 2. Verificar estado del tratamiento
         if (tratamiento.estado !== 'Activo') {
             return res.status(400).json({
                 success: false,
@@ -1381,50 +1388,68 @@ router.post('/actualizarProgreso', async (req, res) => {
             });
         }
         
-        // 2. Verificar que la cita sea parte del tratamiento
-        const [citas] = await db.promise().query(
+        // 3. Obtener todas las citas del tratamiento
+        const [todasCitas] = await db.promise().query(
             'SELECT * FROM citas WHERE tratamiento_id = ?',
             [tratamiento_id]
         );
         
-        // Buscar la cita específica
+        console.log(`[PROGRESO] Total citas encontradas: ${todasCitas.length}`);
+        
+        // 4. Buscar la cita específica (por id o consulta_id)
         let citaEncontrada = null;
-        for (const cita of citas) {
-            if (cita.id == cita_id || (cita.consulta_id && cita.consulta_id == cita_id)) {
+        for (const cita of todasCitas) {
+            console.log(`[PROGRESO] Comparando cita ${cita_id} con cita.id=${cita.id}, cita.consulta_id=${cita.consulta_id || 'N/A'}`);
+            
+            // Intentar todas las variantes posibles de coincidencia
+            if (cita.id == cita_id || 
+                (cita.consulta_id && cita.consulta_id == cita_id)) {
                 citaEncontrada = cita;
                 break;
             }
         }
         
         if (!citaEncontrada) {
+            console.log(`[PROGRESO] No se encontró la cita ${cita_id} para el tratamiento ${tratamiento_id}`);
+            console.log('[PROGRESO] Citas disponibles:', todasCitas.map(c => ({id: c.id, consulta_id: c.consulta_id})));
+            
             return res.status(404).json({
                 success: false,
                 message: 'La cita no pertenece a este tratamiento'
             });
         }
         
-        console.log("Información de la cita encontrada:", JSON.stringify(citaEncontrada));
+        console.log(`[PROGRESO] Cita encontrada ID=${citaEncontrada.id}, estado=${citaEncontrada.estado}`);
         
-        // 3. Incrementar directamente el contador de citas completadas
+        // 5. Verificar que la cita esté completada
+        if (citaEncontrada.estado !== 'Completada') {
+            // Actualizar el estado de la cita a Completada si es necesario
+            await db.promise().query(
+                'UPDATE citas SET estado = "Completada" WHERE id = ?',
+                [citaEncontrada.id]
+            );
+            console.log(`[PROGRESO] Cita ${citaEncontrada.id} actualizada a Completada`);
+        }
+        
+        // 6. Incrementar directamente el contador de citas completadas
         const nuevoNumeroCompletadas = tratamiento.citas_completadas + 1;
         const estaCompleto = nuevoNumeroCompletadas >= tratamiento.total_citas_programadas;
         const nuevoEstado = estaCompleto ? 'Finalizado' : 'Activo';
         
-        console.log(`Actualizando contador: ${tratamiento.citas_completadas} -> ${nuevoNumeroCompletadas}`);
-        console.log(`¿Tratamiento completado? ${estaCompleto}`);
-        console.log(`Nuevo estado: ${nuevoEstado}`);
+        console.log(`[PROGRESO] Actualizando contador: ${tratamiento.citas_completadas} -> ${nuevoNumeroCompletadas}`);
+        console.log(`[PROGRESO] ¿Tratamiento completado? ${estaCompleto}`);
         
-        // 4. Actualizar el tratamiento
         await db.promise().query(
             'UPDATE tratamientos SET citas_completadas = ?, estado = ?, actualizado_en = NOW() WHERE id = ?',
             [nuevoNumeroCompletadas, nuevoEstado, tratamiento_id]
         );
         
-        // 5. Programar siguiente cita si no está completo y se solicita
-        let nuevaCitaId = null;
-        let fechaNuevaCita = null;
+        console.log(`[PROGRESO] Tratamiento actualizado. Nuevo contador: ${nuevoNumeroCompletadas}, Estado: ${nuevoEstado}`);
         
-        if (!estaCompleto && incluir_siguiente_cita) {
+        // 7. Programar siguiente cita si no está completo
+        let nuevaCitaInfo = null;
+        
+        if (!estaCompleto) {
             const numeroCitaSiguiente = nuevoNumeroCompletadas + 1;
             
             // Calcular fecha un mes después
@@ -1435,9 +1460,9 @@ router.post('/actualizarProgreso', async (req, res) => {
             const fechaFormateada = moment(fechaSiguiente).format('YYYY-MM-DD HH:mm:ss');
             const nuevasNotas = `Cita #${numeroCitaSiguiente} programada automáticamente (Tratamiento #${tratamiento_id})`;
             
-            console.log(`Programando cita #${numeroCitaSiguiente} para ${fechaFormateada}`);
+            console.log(`[PROGRESO] Programando cita #${numeroCitaSiguiente} para ${fechaFormateada}`);
             
-            // Crear siguiente cita
+            // Crear nueva cita con valores de la cita anterior
             const [resultadoInsert] = await db.promise().query(
                 `INSERT INTO citas (
                     paciente_id, nombre, apellido_paterno, apellido_materno, 
@@ -1463,35 +1488,36 @@ router.post('/actualizarProgreso', async (req, res) => {
                 ]
             );
             
-            nuevaCitaId = resultadoInsert.insertId;
-            fechaNuevaCita = fechaFormateada;
+            const nuevaCitaId = resultadoInsert.insertId;
+            console.log(`[PROGRESO] Nueva cita creada ID=${nuevaCitaId}`);
             
-            console.log(`Nueva cita creada con ID ${nuevaCitaId}`);
+            nuevaCitaInfo = {
+                id: nuevaCitaId,
+                numero: numeroCitaSiguiente,
+                fecha: fechaFormateada
+            };
         }
         
-        // 6. Responder con éxito
+        // 8. Enviar respuesta
         return res.status(200).json({
             success: true,
             message: estaCompleto ? 'Tratamiento completado' : 'Progreso actualizado y siguiente cita programada',
-            tratamiento_id: tratamiento_id,
+            tratamiento_id: parseInt(tratamiento_id),
             citas_completadas: nuevoNumeroCompletadas,
             total_citas: tratamiento.total_citas_programadas,
             tratamiento_completado: estaCompleto,
             tratamiento_estado: nuevoEstado,
-            siguiente_cita: !estaCompleto && incluir_siguiente_cita ? {
-                cita_id: nuevaCitaId,
-                fecha: fechaNuevaCita,
-                numero: nuevoNumeroCompletadas + 1
-            } : null
+            siguiente_cita: nuevaCitaInfo
         });
         
     } catch (error) {
-        console.error('Error en la actualización directa:', error);
+        console.error('[PROGRESO] Error:', error);
+        logger.error('[PROGRESO] Error en actualizarProgreso:', error);
         return res.status(500).json({
             success: false,
-            message: 'Error interno del servidor: ' + error.message,
-            error: error.toString()
+            message: 'Error interno del servidor: ' + error.message
         });
     }
 });
+
 module.exports = router;
