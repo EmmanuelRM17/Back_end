@@ -717,39 +717,40 @@ async function getServiceName(serviceId) {
 router.get("/all", async (req, res) => {
     try {
         const query = `
-        SELECT 
-            c.id AS consulta_id,
-            c.paciente_id,
-            c.nombre AS paciente_nombre,
-            c.apellido_paterno AS paciente_apellido_paterno,
-            c.apellido_materno AS paciente_apellido_materno,
-            c.genero AS paciente_genero,
-            c.fecha_nacimiento AS paciente_fecha_nacimiento,
-            c.correo AS paciente_correo,
-            c.telefono AS paciente_telefono,
-            c.odontologo_id,
-            c.odontologo_nombre,
-            c.servicio_id,
-            c.servicio_nombre,
-            c.categoria_servicio,
-            c.precio_servicio,
-            c.fecha_consulta,
-            c.estado,
-            c.notas,
-            c.horario_id,
-            c.fecha_solicitud,
-            c.archivado,
-            s.tratamiento AS es_tratamiento, 
-            COALESCE(COUNT(c2.id), 0) + 1 AS numero_cita_tratamiento
-        FROM citas c
-        LEFT JOIN servicios s ON c.servicio_id = s.id
-        LEFT JOIN citas c2 ON c2.paciente_id = c.paciente_id 
-                         AND c2.servicio_id = c.servicio_id 
-                         AND c2.fecha_consulta < c.fecha_consulta
-                         AND c2.archivado = FALSE
-        GROUP BY c.id
-        ORDER BY c.fecha_consulta DESC;
-    `;
+SELECT 
+    c.id AS consulta_id,
+    c.paciente_id,
+    c.nombre AS paciente_nombre,
+    c.apellido_paterno AS paciente_apellido_paterno,
+    c.apellido_materno AS paciente_apellido_materno,
+    c.genero AS paciente_genero,
+    c.fecha_nacimiento AS paciente_fecha_nacimiento,
+    c.correo AS paciente_correo,
+    c.telefono AS paciente_telefono,
+    c.odontologo_id,
+    c.odontologo_nombre,
+    c.servicio_id,
+    c.servicio_nombre,
+    c.categoria_servicio,
+    c.precio_servicio,
+    c.fecha_consulta,
+    c.estado,
+    c.notas,
+    c.horario_id,
+    c.fecha_solicitud,
+    c.archivado,
+    c.tratamiento_id,  
+    s.tratamiento AS es_tratamiento, 
+    COALESCE(COUNT(c2.id), 0) + 1 AS numero_cita_tratamiento
+FROM citas c
+LEFT JOIN servicios s ON c.servicio_id = s.id
+LEFT JOIN citas c2 ON c2.paciente_id = c.paciente_id 
+                 AND c2.servicio_id = c.servicio_id 
+                 AND c2.fecha_consulta < c.fecha_consulta
+                 AND c2.archivado = FALSE
+GROUP BY c.id
+ORDER BY c.fecha_consulta DESC;
+`;
 
         // Ejecutar consulta con async/await
         const [results] = await db.promise().query(query);

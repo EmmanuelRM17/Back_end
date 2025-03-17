@@ -1023,7 +1023,7 @@ router.post('/actualizarProgreso', async (req, res) => {
                     genero, fecha_nacimiento, correo, telefono, 
                     odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
                     categoria_servicio, precio_servicio, ?, 
-                    NOW(), 'Pendiente', ?, tratamiento_id,
+                    NOW(), 'Confirmada', ?, tratamiento_id,
                     ?, 0
                 FROM citas WHERE id = ?`,
                 [
