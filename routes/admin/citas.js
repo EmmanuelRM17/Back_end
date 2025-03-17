@@ -1061,9 +1061,10 @@ function validarTransicionEstado(estadoActual, nuevoEstado) {
     return false;
 }
 
+// Reemplaza la función incrementarCitas con esta versión corregida
 router.put('/incrementarCitas/:id', async (req, res) => {
-    const { id } = req.params;
-    const { cita_id } = req.body; // ID de la cita que se completó
+    const { id } = req.params; // ID del tratamiento
+    const { cita_id } = req.body; // ID de la cita que se completó (consulta_id)
 
     if (!id || isNaN(id)) {
         return res.status(400).json({ message: 'ID de tratamiento inválido.' });
@@ -1073,6 +1074,9 @@ router.put('/incrementarCitas/:id', async (req, res) => {
         return res.status(400).json({ message: 'ID de cita inválido.' });
     }
 
+    // Agregar logs para depuración
+    console.log('Petición recibida - Tratamiento ID:', id, 'Cita ID:', cita_id);
+
     try {
         // Verificar si el tratamiento existe
         const [tratamiento] = await db.promise().query(
@@ -1081,8 +1085,11 @@ router.put('/incrementarCitas/:id', async (req, res) => {
         );
 
         if (tratamiento.length === 0) {
+            console.log('Tratamiento no encontrado:', id);
             return res.status(404).json({ message: 'No se encontró el tratamiento con el ID proporcionado.' });
         }
+
+        console.log('Tratamiento encontrado:', tratamiento[0].nombre_tratamiento, 'Estado:', tratamiento[0].estado);
 
         // Verificar si el tratamiento está activo
         if (tratamiento[0].estado !== 'Activo') {
@@ -1091,18 +1098,34 @@ router.put('/incrementarCitas/:id', async (req, res) => {
             });
         }
 
-        // Verificar si la cita pertenece a este tratamiento y está en estado "Completada"
+        // CORRECCIÓN: Buscar la cita por su consulta_id, no por id
+        // Aquí estaba el error principal, la consulta usaba id pero el frontend enviaba consulta_id
         const [cita] = await db.promise().query(
-            'SELECT * FROM citas WHERE id = ? AND tratamiento_id = ?', 
+            'SELECT * FROM citas WHERE consulta_id = ? AND tratamiento_id = ?', 
             [cita_id, id]
         );
-        
 
         if (cita.length === 0) {
-            return res.status(404).json({ 
-                message: 'No se encontró la cita especificada asociada a este tratamiento.' 
-            });
+            console.log('Cita no encontrada. Consulta_ID:', cita_id, 'Tratamiento_ID:', id);
+            
+            // Intento alternativo por si acaso
+            const [citaAlt] = await db.promise().query(
+                'SELECT * FROM citas WHERE id = ? AND tratamiento_id = ?', 
+                [cita_id, id]
+            );
+            
+            if (citaAlt.length > 0) {
+                console.log('Cita encontrada usando id en lugar de consulta_id');
+                // Si se encuentra por id, continuar con esa cita
+                cita[0] = citaAlt[0];
+            } else {
+                return res.status(404).json({ 
+                    message: 'No se encontró la cita especificada asociada a este tratamiento.' 
+                });
+            }
         }
+
+        console.log('Cita encontrada:', cita[0].consulta_id || cita[0].id, 'Estado:', cita[0].estado);
 
         if (cita[0].estado !== 'Completada') {
             return res.status(400).json({ 
@@ -1125,6 +1148,7 @@ router.put('/incrementarCitas/:id', async (req, res) => {
 
         const fechaActualizacion = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
         await db.promise().query(updateQuery, [fechaActualizacion, parseInt(id)]);
+        console.log('Contador de citas incrementado para el tratamiento:', id);
 
         // Verificar si con esta actualización se completó el tratamiento
         const [tratamientoActualizado] = await db.promise().query(
@@ -1133,16 +1157,33 @@ router.put('/incrementarCitas/:id', async (req, res) => {
         );
 
         const estaCompleto = tratamientoActualizado[0].citas_completadas >= tratamientoActualizado[0].total_citas_programadas;
+        console.log('Tratamiento actualizado - Citas completadas:', tratamientoActualizado[0].citas_completadas, 
+                    'Total programadas:', tratamientoActualizado[0].total_citas_programadas,
+                    'Completado:', estaCompleto);
 
         // Si el tratamiento NO está completo, programar la siguiente cita
         if (!estaCompleto) {
-            // Obtener todos los detalles de la cita actual
+            // CORRECCIÓN: Buscar la cita detallada por consulta_id, no por id
             const [citaDetallada] = await db.promise().query(
-                'SELECT * FROM citas WHERE id = ?', 
+                'SELECT * FROM citas WHERE consulta_id = ?', 
                 [cita_id]
             );
             
+            if (citaDetallada.length === 0) {
+                // Intento alternativo usando id
+                const [citaDetalladaAlt] = await db.promise().query(
+                    'SELECT * FROM citas WHERE id = ?', 
+                    [cita_id]
+                );
+                
+                if (citaDetalladaAlt.length > 0) {
+                    citaDetallada[0] = citaDetalladaAlt[0];
+                }
+            }
+            
             if (citaDetallada.length > 0) {
+                console.log('Cita detallada encontrada, programando siguiente cita');
+                
                 // Calcular la fecha para la próxima cita (un mes después)
                 const fechaActual = new Date(citaDetallada[0].fecha_consulta);
                 const fechaSiguiente = new Date(fechaActual);
@@ -1207,8 +1248,10 @@ router.put('/incrementarCitas/:id', async (req, res) => {
                     moment(fechaSiguiente).format('YYYY-MM-DD HH:mm:ss'),
                     nuevasNotas,
                     numeroCitaSiguiente,
-                    cita_id
+                    citaDetallada[0].id // Importante: usar id, no consulta_id
                 ]);
+                
+                console.log('Nueva cita programada:', nuevaCita.insertId, 'Número:', numeroCitaSiguiente);
                 
                 // Respuesta con información de la siguiente cita
                 return res.json({ 
@@ -1222,10 +1265,13 @@ router.put('/incrementarCitas/:id', async (req, res) => {
                         fecha: moment(fechaSiguiente).format('YYYY-MM-DD HH:mm:ss')
                     }
                 });
+            } else {
+                console.log('Error: No se pudo encontrar la cita detallada para programar la siguiente');
             }
         }
         
         // Respuesta sin siguiente cita (cuando el tratamiento está completo)
+        console.log('Tratamiento completado, no se programan más citas');
         res.json({ 
             message: 'Contador de citas completadas incrementado correctamente. Tratamiento completado.',
             citas_completadas: tratamientoActualizado[0].citas_completadas,
@@ -1234,6 +1280,7 @@ router.put('/incrementarCitas/:id', async (req, res) => {
         });
 
     } catch (error) {
+        console.error('Error al incrementar citas completadas:', error);
         logger.error('Error al incrementar citas completadas:', error);
         res.status(500).json({ message: 'Error interno del servidor al actualizar el contador de citas.' });
     }
