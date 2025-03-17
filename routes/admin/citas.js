@@ -1338,4 +1338,160 @@ router.put('/incrementarCitas/:id', async (req, res) => {
     }
 });
 
+router.post('/actualizarProgreso', async (req, res) => {
+    const { tratamiento_id, cita_id, incluir_siguiente_cita = true } = req.body;
+    
+    if (!tratamiento_id || isNaN(tratamiento_id)) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'ID de tratamiento inválido' 
+        });
+    }
+    
+    if (!cita_id || isNaN(cita_id)) {
+        return res.status(400).json({ 
+            success: false, 
+            message: 'ID de cita inválido' 
+        });
+    }
+    
+    console.log(`Iniciando actualización directa del tratamiento ${tratamiento_id} y cita ${cita_id}`);
+    
+    try {
+        // 1. Obtener información del tratamiento actual
+        const [tratamientos] = await db.promise().query(
+            'SELECT * FROM tratamientos WHERE id = ?',
+            [tratamiento_id]
+        );
+        
+        if (tratamientos.length === 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Tratamiento no encontrado'
+            });
+        }
+        
+        const tratamiento = tratamientos[0];
+        console.log("Información del tratamiento:", JSON.stringify(tratamiento));
+        
+        if (tratamiento.estado !== 'Activo') {
+            return res.status(400).json({
+                success: false,
+                message: `El tratamiento debe estar Activo. Estado actual: ${tratamiento.estado}`
+            });
+        }
+        
+        // 2. Verificar que la cita sea parte del tratamiento
+        const [citas] = await db.promise().query(
+            'SELECT * FROM citas WHERE tratamiento_id = ?',
+            [tratamiento_id]
+        );
+        
+        // Buscar la cita específica
+        let citaEncontrada = null;
+        for (const cita of citas) {
+            if (cita.id == cita_id || (cita.consulta_id && cita.consulta_id == cita_id)) {
+                citaEncontrada = cita;
+                break;
+            }
+        }
+        
+        if (!citaEncontrada) {
+            return res.status(404).json({
+                success: false,
+                message: 'La cita no pertenece a este tratamiento'
+            });
+        }
+        
+        console.log("Información de la cita encontrada:", JSON.stringify(citaEncontrada));
+        
+        // 3. Incrementar directamente el contador de citas completadas
+        const nuevoNumeroCompletadas = tratamiento.citas_completadas + 1;
+        const estaCompleto = nuevoNumeroCompletadas >= tratamiento.total_citas_programadas;
+        const nuevoEstado = estaCompleto ? 'Finalizado' : 'Activo';
+        
+        console.log(`Actualizando contador: ${tratamiento.citas_completadas} -> ${nuevoNumeroCompletadas}`);
+        console.log(`¿Tratamiento completado? ${estaCompleto}`);
+        console.log(`Nuevo estado: ${nuevoEstado}`);
+        
+        // 4. Actualizar el tratamiento
+        await db.promise().query(
+            'UPDATE tratamientos SET citas_completadas = ?, estado = ?, actualizado_en = NOW() WHERE id = ?',
+            [nuevoNumeroCompletadas, nuevoEstado, tratamiento_id]
+        );
+        
+        // 5. Programar siguiente cita si no está completo y se solicita
+        let nuevaCitaId = null;
+        let fechaNuevaCita = null;
+        
+        if (!estaCompleto && incluir_siguiente_cita) {
+            const numeroCitaSiguiente = nuevoNumeroCompletadas + 1;
+            
+            // Calcular fecha un mes después
+            const fechaActual = new Date(citaEncontrada.fecha_consulta);
+            const fechaSiguiente = new Date(fechaActual);
+            fechaSiguiente.setMonth(fechaSiguiente.getMonth() + 1);
+            
+            const fechaFormateada = moment(fechaSiguiente).format('YYYY-MM-DD HH:mm:ss');
+            const nuevasNotas = `Cita #${numeroCitaSiguiente} programada automáticamente (Tratamiento #${tratamiento_id})`;
+            
+            console.log(`Programando cita #${numeroCitaSiguiente} para ${fechaFormateada}`);
+            
+            // Crear siguiente cita
+            const [resultadoInsert] = await db.promise().query(
+                `INSERT INTO citas (
+                    paciente_id, nombre, apellido_paterno, apellido_materno, 
+                    genero, fecha_nacimiento, correo, telefono, 
+                    odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
+                    categoria_servicio, precio_servicio, fecha_consulta, 
+                    fecha_solicitud, estado, notas, tratamiento_id,
+                    numero_cita_tratamiento, es_tratamiento
+                ) 
+                SELECT
+                    paciente_id, nombre, apellido_paterno, apellido_materno, 
+                    genero, fecha_nacimiento, correo, telefono, 
+                    odontologo_id, odontologo_nombre, servicio_id, servicio_nombre,
+                    categoria_servicio, precio_servicio, ?, 
+                    NOW(), 'Confirmada', ?, tratamiento_id,
+                    ?, 1
+                FROM citas WHERE id = ?`,
+                [
+                    fechaFormateada,
+                    nuevasNotas,
+                    numeroCitaSiguiente,
+                    citaEncontrada.id
+                ]
+            );
+            
+            nuevaCitaId = resultadoInsert.insertId;
+            fechaNuevaCita = fechaFormateada;
+            
+            console.log(`Nueva cita creada con ID ${nuevaCitaId}`);
+        }
+        
+        // 6. Responder con éxito
+        return res.status(200).json({
+            success: true,
+            message: estaCompleto ? 'Tratamiento completado' : 'Progreso actualizado y siguiente cita programada',
+            tratamiento_id: tratamiento_id,
+            citas_completadas: nuevoNumeroCompletadas,
+            total_citas: tratamiento.total_citas_programadas,
+            tratamiento_completado: estaCompleto,
+            tratamiento_estado: nuevoEstado,
+            siguiente_cita: !estaCompleto && incluir_siguiente_cita ? {
+                cita_id: nuevaCitaId,
+                fecha: fechaNuevaCita,
+                numero: nuevoNumeroCompletadas + 1
+            } : null
+        });
+        
+    } catch (error) {
+        console.error('Error en la actualización directa:', error);
+        return res.status(500).json({
+            success: false,
+            message: 'Error interno del servidor: ' + error.message,
+            error: error.toString()
+        });
+    }
+});
 module.exports = router;
