@@ -8,7 +8,7 @@ const fs = require('fs');
 
 // Configuración de Cloudinary
 cloudinary.config({
-    cloud_name: 'dt797utcm',
+    cloud_name: 'dt797utem',
     api_key: '154434954868491',
     api_secret: 'J-y97KOp8XsdsXB2k_ed2xPPuQE',
     secure: true
