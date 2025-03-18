@@ -29,7 +29,7 @@ router.post('/nueva', async (req, res) => {
 
     try {
         // Formatear fechas usando moment
-        const formattedFechaHora = moment(fecha_hora).tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
+        const formattedFechaHora = moment.parseZone(fecha_hora).format('YYYY-MM-DD HH:mm:ss');
         const formattedFechaSolicitud = moment().tz('America/Mexico_City').format('YYYY-MM-DD HH:mm:ss');
 
         // 1. Verificar información del servicio
