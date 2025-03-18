@@ -5,7 +5,6 @@ const logger = require('../utils/logger');
 const multer = require('multer');
 const cloudinary = require('cloudinary').v2;
 const fs = require('fs');
-const os = require('os');
 
 // Configuración de Cloudinary
 cloudinary.config({
@@ -15,15 +14,8 @@ cloudinary.config({
     secure: true
 });
 
-// Configuración de multer
-const storage = multer.diskStorage({
-    destination: function (req, file, cb) {
-        cb(null, os.tmpdir());
-    },
-    filename: function (req, file, cb) {
-        cb(null, `${Date.now()}-${file.originalname.replace(/\s+/g, '-')}`);
-    }
-});
+// Usar almacenamiento en memoria en lugar de disco para evitar problemas en Render
+const storage = multer.memoryStorage();
 
 const upload = multer({
     storage,
@@ -42,6 +34,29 @@ const handleError = (res, error, message) => {
     logger.error(message, error);
     return res.status(500).json({ message });
 };
+
+/**
+ * @route   GET /api/imagenes/test-cloudinary
+ * @desc    Verifica la conexión con Cloudinary
+ */
+router.get('/test-cloudinary', (req, res) => {
+    cloudinary.api.ping((error, result) => {
+        if (error) {
+            console.error('Error conectando con Cloudinary:', error);
+            return res.status(500).json({
+                status: 'error',
+                message: 'Error conectando con Cloudinary',
+                error: error.message
+            });
+        }
+
+        res.status(200).json({
+            status: 'success',
+            message: 'Conexión exitosa con Cloudinary',
+            result: result
+        });
+    });
+});
 
 /**
  * @route   GET /api/imagenes/resumen
@@ -113,7 +128,7 @@ router.get('/pendientes', (req, res) => {
 
 /**
  * @route   POST /api/imagenes/upload
- * @desc    Subir imagen a Cloudinary con mejor manejo de errores
+ * @desc    Subir imagen a Cloudinary usando base64 directamente
  */
 router.post('/upload', upload.single('image'), (req, res) => {
     try {
@@ -121,160 +136,119 @@ router.post('/upload', upload.single('image'), (req, res) => {
             return res.status(400).json({ message: 'No se ha enviado ninguna imagen válida' });
         }
 
-        // Imprimir información detallada para debug
+        // Información de debug
         console.log('Archivo recibido:', {
             originalname: req.file.originalname,
             size: req.file.size,
-            path: req.file.path,
             mimetype: req.file.mimetype
         });
-
-        // Verificar que el archivo existe y tiene tamaño
-        if (!fs.existsSync(req.file.path)) {
-            return res.status(400).json({ message: 'Error: No se pudo acceder al archivo subido' });
-        }
 
         if (req.file.size === 0) {
             return res.status(400).json({ message: 'Error: El archivo está vacío' });
         }
 
-        // Configuración de subida a Cloudinary
+        // Usar directamente el buffer en memoria
+        const base64Image = req.file.buffer.toString('base64');
+        const dataURI = `data:${req.file.mimetype};base64,${base64Image}`;
+
+        console.log('Imagen convertida a base64, iniciando subida a Cloudinary...');
+
+        // Opciones para Cloudinary
         const uploadOptions = {
             folder: 'Imagenes',
             resource_type: 'image',
-            timeout: 120000 // 2 minutos de timeout
+            timeout: 120000 // 2 minutos
         };
 
-        console.log('Iniciando subida a Cloudinary...');
-
-        // Intentar leer el archivo para verificar que se puede acceder
-        fs.readFile(req.file.path, (readErr, fileBuffer) => {
-            if (readErr) {
-                console.error('Error al leer el archivo temporal:', readErr);
-                return res.status(500).json({ 
-                    message: 'Error al leer el archivo temporal',
-                    error: readErr.message
+        // Subida directa con base64
+        cloudinary.uploader.upload(dataURI, uploadOptions, (error, result) => {
+            if (error) {
+                console.error('Error al subir imagen a Cloudinary:', error);
+                return res.status(500).json({
+                    message: 'Error al subir la imagen a Cloudinary',
+                    error: error.message || 'Error desconocido'
                 });
             }
 
-            // El archivo se pudo leer, intentar subir a Cloudinary
-            cloudinary.uploader.upload(req.file.path, uploadOptions, (cloudinaryErr, result) => {
-                // Limpiar archivo temporal primero
-                try {
-                    if (fs.existsSync(req.file.path)) {
-                        fs.unlinkSync(req.file.path);
-                        console.log('Archivo temporal eliminado correctamente');
-                    }
-                } catch (unlinkError) {
-                    console.error('Error al eliminar archivo temporal (no crítico):', unlinkError);
-                }
+            console.log('Imagen subida con éxito, public_id:', result.public_id);
 
-                // Manejar errores de Cloudinary
-                if (cloudinaryErr) {
-                    console.error('Error al subir imagen a Cloudinary:', cloudinaryErr);
-                    
-                    // Intentar alternativa: subir mediante dataURI si falló el método de archivo
-                    const base64Image = fileBuffer.toString('base64');
-                    const dataURI = `data:${req.file.mimetype};base64,${base64Image}`;
-                    
-                    console.log('Intentando método alternativo (dataURI)...');
-                    
-                    cloudinary.uploader.upload(dataURI, uploadOptions, (altError, altResult) => {
-                        if (altError) {
-                            console.error('Error en método alternativo:', altError);
-                            return res.status(500).json({ 
-                                message: 'Error al subir la imagen a Cloudinary (ambos métodos)',
-                                error: altError.message
-                            });
-                        }
-                        
-                        console.log('¡Éxito con método alternativo! ID:', altResult.public_id);
-                        
-                        return res.status(200).json({
-                            message: 'Imagen subida correctamente (método alternativo)',
-                            image: {
-                                public_id: altResult.public_id,
-                                url: altResult.secure_url,
-                                format: altResult.format || 'jpg',
-                                created_at: new Date().toISOString().split('T')[0]
-                            }
-                        });
-                    });
-                    
-                    return;
+            res.status(200).json({
+                message: 'Imagen subida correctamente',
+                image: {
+                    public_id: result.public_id,
+                    url: result.secure_url,
+                    format: result.format || 'jpg',
+                    created_at: new Date().toISOString().split('T')[0]
                 }
-
-                // Si llegamos aquí, la subida fue exitosa
-                console.log('Imagen subida con éxito, public_id:', result.public_id);
-                
-                res.status(200).json({
-                    message: 'Imagen subida correctamente',
-                    image: {
-                        public_id: result.public_id,
-                        url: result.secure_url,
-                        format: result.format || 'jpg',
-                        created_at: new Date().toISOString().split('T')[0]
-                    }
-                });
             });
         });
     } catch (error) {
-        // Error general - asegurarnos de limpiar archivos temporales
         console.error('Error general en proceso de subida:', error);
-        
-        try {
-            if (req.file && req.file.path && fs.existsSync(req.file.path)) {
-                fs.unlinkSync(req.file.path);
-                console.log('Archivo temporal eliminado después de error');
-            }
-        } catch (unlinkError) {
-            console.error('Error al eliminar archivo temporal:', unlinkError);
-        }
-
-        return res.status(500).json({ 
+        return res.status(500).json({
             message: 'Error interno del servidor al subir imagen',
-            error: error.message
+            error: error.message || 'Error desconocido'
         });
     }
 });
 
 /**
- * @route   POST /api/imagenes/asignar/:id
- * @desc    Asignar imagen a un servicio usando public_id
+ * @route   POST /api/imagenes/upload-base64
+ * @desc    Subir imagen a Cloudinary usando base64 directamente desde el cliente
  */
-router.post('/asignar/:id', (req, res) => {
-    const { id } = req.params;
-    const { imageUrl, public_id } = req.body;
-
-    if (!imageUrl || !public_id) {
-        return res.status(400).json({ message: 'No se ha proporcionado la URL y el Public ID de la imagen' });
-    }
-
+router.post('/upload-base64', (req, res) => {
     try {
-        db.query('SELECT id, title FROM servicios WHERE id = ?', [id], (err, servicios) => {
-            if (err) {
-                return handleError(res, err, `Error al verificar servicio ${id}`);
-            }
+        const { image, name } = req.body;
 
-            if (!servicios || servicios.length === 0) {
-                return res.status(404).json({ message: 'Servicio no encontrado' });
-            }
+        if (!image) {
+            return res.status(400).json({ message: 'No se ha enviado ninguna imagen válida' });
+        }
 
-            // Guardar tanto la URL como el public_id
-            db.query('UPDATE servicios SET image_url = ?, image_public_id = ? WHERE id = ?', 
-                [imageUrl, public_id, id], (updateErr) => {
-                if (updateErr) {
-                    return handleError(res, updateErr, `Error al asignar imagen al servicio ${id}`);
-                }
+        console.log(`Recibida imagen base64 de ${name || 'desconocido'}`);
 
-                res.status(200).json({ 
-                    message: `Imagen asignada correctamente al servicio: ${servicios[0].title}`,
-                    public_id: public_id
+        // Eliminar cualquier parte de la cadena después de 100 caracteres para el log
+        console.log('Base64 recibido (primeros 100 caracteres):', image.substring(0, 100) + '...');
+
+        // Verificar que la cadena base64 sea válida
+        if (!image.startsWith('data:image/')) {
+            return res.status(400).json({ message: 'Formato de imagen no válido' });
+        }
+
+        // Opciones para Cloudinary
+        const uploadOptions = {
+            folder: 'Imagenes',
+            resource_type: 'image',
+            timeout: 120000, // 2 minutos
+            public_id: name ? name.split('.')[0].replace(/\s+/g, '_') : undefined
+        };
+
+        // Subida directa con base64 que ya viene del cliente
+        cloudinary.uploader.upload(image, uploadOptions, (error, result) => {
+            if (error) {
+                console.error('Error al subir imagen a Cloudinary:', error);
+                return res.status(500).json({
+                    message: 'Error al subir la imagen a Cloudinary',
+                    error: error.message || 'Error desconocido'
                 });
+            }
+
+            console.log('Imagen subida con éxito, public_id:', result.public_id);
+
+            res.status(200).json({
+                message: 'Imagen subida correctamente',
+                image: {
+                    public_id: result.public_id,
+                    url: result.secure_url,
+                    format: result.format || 'jpg',
+                    created_at: new Date().toISOString().split('T')[0]
+                }
             });
         });
     } catch (error) {
-        handleError(res, error, `Error interno del servidor al asignar imagen al servicio ${id}`);
+        console.error('Error general en proceso de subida base64:', error);
+        return res.status(500).json({
+            message: 'Error interno del servidor al subir imagen',
+            error: error.message || 'Error desconocido'
+        });
     }
 });
 
@@ -307,7 +281,7 @@ router.delete('/remover/:id', (req, res) => {
                     return handleError(res, updateErr, `Error al remover imagen del servicio ${id}`);
                 }
 
-                res.status(200).json({ 
+                res.status(200).json({
                     message: `Imagen removida correctamente del servicio: ${servicio.title}`,
                     public_id: servicio.image_public_id
                 });
@@ -336,17 +310,17 @@ router.delete('/eliminar', (req, res) => {
             }
 
             // Actualizar servicios que usan esta imagen
-            db.query('UPDATE servicios SET image_url = NULL, image_public_id = NULL WHERE image_public_id = ?', 
+            db.query('UPDATE servicios SET image_url = NULL, image_public_id = NULL WHERE image_public_id = ?',
                 [public_id], (err) => {
-                if (err) {
-                    logger.error(`Error al actualizar servicios que usan la imagen ${public_id}:`, err);
-                }
+                    if (err) {
+                        logger.error(`Error al actualizar servicios que usan la imagen ${public_id}:`, err);
+                    }
 
-                res.status(200).json({ 
-                    message: 'Imagen eliminada correctamente',
-                    public_id: public_id
+                    res.status(200).json({
+                        message: 'Imagen eliminada correctamente',
+                        public_id: public_id
+                    });
                 });
-            });
         });
     } catch (error) {
         handleError(res, error, `Error interno del servidor al eliminar imagen ${public_id}`);
@@ -360,7 +334,7 @@ router.delete('/eliminar', (req, res) => {
 router.get('/cloudinary', (req, res) => {
     try {
         // Obtener imágenes directamente de Cloudinary
-        cloudinary.api.resources({ 
+        cloudinary.api.resources({
             type: 'upload',
             prefix: 'Imagenes/',
             max_results: 100
@@ -379,7 +353,7 @@ router.get('/cloudinary', (req, res) => {
                     created_at: new Date(resource.created_at * 1000).toISOString().split('T')[0],
                     format: resource.format
                 }));
-                
+
                 return res.status(200).json({ data: images });
             } else {
                 // Si no hay imágenes en Cloudinary, intentar obtener de la base de datos
@@ -395,7 +369,7 @@ router.get('/cloudinary', (req, res) => {
 // Función auxiliar para obtener imágenes de la base de datos como fallback
 function getFallbackImages(res) {
     const query = 'SELECT DISTINCT image_url, image_public_id FROM servicios WHERE image_url IS NOT NULL AND image_public_id IS NOT NULL';
-    
+
     db.query(query, (err, results) => {
         if (err) {
             console.error('Error al obtener imágenes desde la base de datos:', err);
@@ -406,7 +380,7 @@ function getFallbackImages(res) {
             // Extraer ID de la URL o usar el public_id almacenado
             const publicId = row.image_public_id || '';
             const id = publicId.includes('/') ? publicId.split('/')[1] : publicId;
-            
+
             return {
                 id: id,
                 public_id: row.image_public_id,
@@ -415,8 +389,8 @@ function getFallbackImages(res) {
                 format: 'jpg' // Valor por defecto
             };
         });
-        
-        res.status(200).json({ 
+
+        res.status(200).json({
             data: images,
             message: 'Datos obtenidos desde la base de datos (fallback)'
         });
@@ -429,23 +403,23 @@ function getFallbackImages(res) {
  */
 router.get('/by-id/:public_id', (req, res) => {
     const { public_id } = req.params;
-    
+
     if (!public_id) {
         return res.status(400).json({ message: 'Public ID no proporcionado' });
     }
-    
+
     // Construir el public_id completo con el prefijo "Imagenes/"
     const fullPublicId = public_id.includes('Imagenes/') ? public_id : `Imagenes/${public_id}`;
-    
+
     try {
         cloudinary.api.resource(fullPublicId, (error, result) => {
             if (error) {
-                return res.status(404).json({ 
+                return res.status(404).json({
                     message: 'Imagen no encontrada en Cloudinary',
                     error: error.message
                 });
             }
-            
+
             res.status(200).json({
                 public_id: result.public_id,
                 url: result.secure_url,
@@ -472,6 +446,73 @@ router.use((err, req, res, next) => {
         message: 'Error interno del servidor',
         error: err.message
     });
+});
+
+
+/**
+ * @route   GET /api/imagenes/check-db
+ * @desc    Verificar la estructura de la tabla servicios
+ */
+router.get('/check-db', (req, res) => {
+    try {
+        // Consulta que verifica si existe la columna image_public_id
+        const query = `
+            SELECT column_name 
+            FROM information_schema.columns 
+            WHERE table_name = 'servicios' 
+            AND column_name = 'image_public_id'
+        `;
+
+        db.query(query, (err, results) => {
+            if (err) {
+                console.error('Error al verificar estructura de base de datos:', err);
+                return res.status(500).json({
+                    status: 'error',
+                    message: 'Error al verificar estructura de base de datos',
+                    error: err.message
+                });
+            }
+
+            const hasImagePublicIdColumn = results && results.length > 0;
+
+            if (!hasImagePublicIdColumn) {
+                // Si no existe la columna, intentamos crearla
+                const alterQuery = `ALTER TABLE servicios ADD COLUMN image_public_id VARCHAR(255)`;
+
+                db.query(alterQuery, (alterErr) => {
+                    if (alterErr) {
+                        return res.status(500).json({
+                            status: 'error',
+                            message: 'La columna image_public_id no existe y no se pudo crear',
+                            error: alterErr.message,
+                            solution: 'Ejecuta manualmente: ALTER TABLE servicios ADD COLUMN image_public_id VARCHAR(255);'
+                        });
+                    }
+
+                    // Columna creada exitosamente
+                    res.status(200).json({
+                        status: 'success',
+                        message: 'Columna image_public_id creada exitosamente en la tabla servicios',
+                        columnCreated: true
+                    });
+                });
+            } else {
+                // La columna ya existe
+                res.status(200).json({
+                    status: 'success',
+                    message: 'La estructura de la base de datos es correcta',
+                    hasImagePublicIdColumn: true
+                });
+            }
+        });
+    } catch (error) {
+        console.error('Error al verificar base de datos:', error);
+        res.status(500).json({
+            status: 'error',
+            message: 'Error interno al verificar base de datos',
+            error: error.message
+        });
+    }
 });
 
 module.exports = router;
