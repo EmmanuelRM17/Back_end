@@ -113,7 +113,7 @@ router.get('/pendientes', (req, res) => {
 
 /**
  * @route   POST /api/imagenes/upload
- * @desc    Subir imagen a Cloudinary y devolver el Public ID
+ * @desc    Subir imagen a Cloudinary con mejor manejo de errores
  */
 router.post('/upload', upload.single('image'), (req, res) => {
     try {
@@ -121,61 +121,120 @@ router.post('/upload', upload.single('image'), (req, res) => {
             return res.status(400).json({ message: 'No se ha enviado ninguna imagen válida' });
         }
 
-        console.log('Archivo recibido:', req.file.originalname);
+        // Imprimir información detallada para debug
+        console.log('Archivo recibido:', {
+            originalname: req.file.originalname,
+            size: req.file.size,
+            path: req.file.path,
+            mimetype: req.file.mimetype
+        });
 
-        // Verificar que el archivo existe
+        // Verificar que el archivo existe y tiene tamaño
         if (!fs.existsSync(req.file.path)) {
             return res.status(400).json({ message: 'Error: No se pudo acceder al archivo subido' });
         }
 
+        if (req.file.size === 0) {
+            return res.status(400).json({ message: 'Error: El archivo está vacío' });
+        }
+
+        // Configuración de subida a Cloudinary
         const uploadOptions = {
             folder: 'Imagenes',
             resource_type: 'image',
-            timeout: 60000 // 60 segundos de timeout
+            timeout: 120000 // 2 minutos de timeout
         };
 
-        // Subir a Cloudinary
-        cloudinary.uploader.upload(req.file.path, uploadOptions, (error, result) => {
-            // Eliminar archivo temporal
-            try {
-                if (fs.existsSync(req.file.path)) {
-                    fs.unlinkSync(req.file.path);
-                }
-            } catch (unlinkError) {
-                console.error('Error al eliminar archivo temporal:', unlinkError);
-            }
+        console.log('Iniciando subida a Cloudinary...');
 
-            if (error) {
-                console.error('Error al subir imagen a Cloudinary:', error);
+        // Intentar leer el archivo para verificar que se puede acceder
+        fs.readFile(req.file.path, (readErr, fileBuffer) => {
+            if (readErr) {
+                console.error('Error al leer el archivo temporal:', readErr);
                 return res.status(500).json({ 
-                    message: 'Error al subir la imagen a Cloudinary',
-                    error: error.message
+                    message: 'Error al leer el archivo temporal',
+                    error: readErr.message
                 });
             }
 
-            console.log('Imagen subida con público ID:', result.public_id);
-            
-            res.status(200).json({
-                message: 'Imagen subida correctamente',
-                image: {
-                    public_id: result.public_id,
-                    url: result.secure_url,
-                    format: result.format || 'jpg',
-                    created_at: new Date().toISOString().split('T')[0]
+            // El archivo se pudo leer, intentar subir a Cloudinary
+            cloudinary.uploader.upload(req.file.path, uploadOptions, (cloudinaryErr, result) => {
+                // Limpiar archivo temporal primero
+                try {
+                    if (fs.existsSync(req.file.path)) {
+                        fs.unlinkSync(req.file.path);
+                        console.log('Archivo temporal eliminado correctamente');
+                    }
+                } catch (unlinkError) {
+                    console.error('Error al eliminar archivo temporal (no crítico):', unlinkError);
                 }
+
+                // Manejar errores de Cloudinary
+                if (cloudinaryErr) {
+                    console.error('Error al subir imagen a Cloudinary:', cloudinaryErr);
+                    
+                    // Intentar alternativa: subir mediante dataURI si falló el método de archivo
+                    const base64Image = fileBuffer.toString('base64');
+                    const dataURI = `data:${req.file.mimetype};base64,${base64Image}`;
+                    
+                    console.log('Intentando método alternativo (dataURI)...');
+                    
+                    cloudinary.uploader.upload(dataURI, uploadOptions, (altError, altResult) => {
+                        if (altError) {
+                            console.error('Error en método alternativo:', altError);
+                            return res.status(500).json({ 
+                                message: 'Error al subir la imagen a Cloudinary (ambos métodos)',
+                                error: altError.message
+                            });
+                        }
+                        
+                        console.log('¡Éxito con método alternativo! ID:', altResult.public_id);
+                        
+                        return res.status(200).json({
+                            message: 'Imagen subida correctamente (método alternativo)',
+                            image: {
+                                public_id: altResult.public_id,
+                                url: altResult.secure_url,
+                                format: altResult.format || 'jpg',
+                                created_at: new Date().toISOString().split('T')[0]
+                            }
+                        });
+                    });
+                    
+                    return;
+                }
+
+                // Si llegamos aquí, la subida fue exitosa
+                console.log('Imagen subida con éxito, public_id:', result.public_id);
+                
+                res.status(200).json({
+                    message: 'Imagen subida correctamente',
+                    image: {
+                        public_id: result.public_id,
+                        url: result.secure_url,
+                        format: result.format || 'jpg',
+                        created_at: new Date().toISOString().split('T')[0]
+                    }
+                });
             });
         });
     } catch (error) {
-        // Eliminar archivo temporal si hay un error
+        // Error general - asegurarnos de limpiar archivos temporales
+        console.error('Error general en proceso de subida:', error);
+        
         try {
             if (req.file && req.file.path && fs.existsSync(req.file.path)) {
                 fs.unlinkSync(req.file.path);
+                console.log('Archivo temporal eliminado después de error');
             }
         } catch (unlinkError) {
             console.error('Error al eliminar archivo temporal:', unlinkError);
         }
 
-        handleError(res, error, 'Error interno del servidor al subir imagen');
+        return res.status(500).json({ 
+            message: 'Error interno del servidor al subir imagen',
+            error: error.message
+        });
     }
 });
 
