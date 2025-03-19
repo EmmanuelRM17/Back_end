@@ -8,16 +8,18 @@ const path = require('path');
 const ftp = require('basic-ftp');
 
 // Configuración FTP
+// Configuración de FTP para Hostinger (corregida)
 const FTP_CONFIG = {
-  host: 'ftp.odontologiacarol.com',
-  user: 'u478151766.Odontologialmg',
-  password: 'sP8+?;Vs:',
-  secure: false
-};
-
-// Directorio de imágenes en Hostinger
-const FTP_IMG_DIR = '/Imagenes';
-const IMAGE_URL_BASE = 'https://odontologiacarol.com/Imagenes/';
+    host: 'ftp.odontologiacarol.com', // Host correcto según tu imagen
+    user: 'u478151766.Odontologialmg', // Usuario correcto según tu imagen
+    password: 'sP8+?;Vs:', // Tu contraseña actual 
+    secure: false,
+    port: 21 // Puerto explícito según tu imagen
+  };
+  
+  // Directorio de imágenes en tu servidor Hostinger (ruta completa)
+  const FTP_IMG_DIR = '/home/u478151766/domains/odontologiacarol.com/public_html/Imagenes';
+  const IMAGE_URL_BASE = 'https://odontologiacarol.com/Imagenes/';
 
 // Configuración para almacenar temporalmente las imágenes
 const storage = multer.diskStorage({
