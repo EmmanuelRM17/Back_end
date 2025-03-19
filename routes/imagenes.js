@@ -22,6 +22,7 @@ const IMAGE_URL_BASE = 'https://odontologiacarol.com/Imagenes/';
 //const FTP_IMG_DIR = '/home/u478151766/domains/odontologiacarol.com/public_html/Imagenes';
 //const IMAGE_URL_BASE = 'https://odontologiacarol.com/Imagenes/';
 
+
 // Configuración para almacenar temporalmente las imágenes
 const storage = multer.diskStorage({
     destination: function (req, file, cb) {
@@ -68,6 +69,34 @@ async function connectToFTP() {
     } catch (err) {
         logger.error('Error al conectar con FTP:', err);
         throw new Error('No se pudo conectar al servidor FTP');
+    }
+}
+
+// Función para verificar y crear el directorio si no existe
+async function ensureDirectoryExists(client) {
+    try {
+        // Verificar si existe el directorio principal
+        try {
+            await client.cd('/public_html');
+        } catch (error) {
+            // Si no existe, crearlo
+            await client.mkdir('/public_html');
+        }
+
+        // Verificar si existe el directorio de imágenes
+        try {
+            await client.cd('/public_html/Imagenes');
+        } catch (error) {
+            // Si no existe, crearlo
+            await client.mkdir('/public_html/Imagenes');
+        }
+
+        // Volver al directorio raíz
+        await client.cd('/');
+        return true;
+    } catch (error) {
+        console.error('Error al crear directorio:', error);
+        return false;
     }
 }
 
@@ -164,6 +193,7 @@ router.post('/upload-ftp', upload.single('image'), async (req, res) => {
 
         // Conectar al servidor FTP y subir el archivo
         client = await connectToFTP();
+        await ensureDirectoryExists(client);
         await client.uploadFrom(req.file.path, `${FTP_IMG_DIR}/${filename}`);
         client.close();
 
