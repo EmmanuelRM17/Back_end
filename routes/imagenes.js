@@ -123,10 +123,12 @@ router.get('/ftp-list', async (req, res) => {
         const fileList = await client.list(FTP_IMG_DIR);
         client.close();
 
+        console.log('fileList completo:', fileList);
+
         // Filtrar solo archivos de imágenes
         const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
         const imageFiles = fileList.filter(file =>
-            file.type === 1 && // Es un archivo, no un directorio
+            !file.isDirectory &&
             imageExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
         );
 
@@ -144,6 +146,7 @@ router.get('/ftp-list', async (req, res) => {
         });
     }
 });
+
 
 /**
  * @route   POST /api/imagenes/upload-ftp
