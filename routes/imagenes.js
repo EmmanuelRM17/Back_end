@@ -16,11 +16,10 @@ const FTP_CONFIG = {
     secure: false,
     port: 21 // Puerto explícito según tu imagen
 };
-const FTP_IMG_DIR = '/public_html/Imagenes';  // Ruta relativa, no absoluta
+//Directorio de imágenes en tu servidor Hostinger (ruta completa)
+const FTP_IMG_DIR = '/home/u478151766/domains/odontologiacarol.com/public_html/Imagenes';
+//const FTP_IMG_DIR = '/public_html/Imagenes'; 
 const IMAGE_URL_BASE = 'https://odontologiacarol.com/Imagenes/';
-// Directorio de imágenes en tu servidor Hostinger (ruta completa)
-//const FTP_IMG_DIR = '/home/u478151766/domains/odontologiacarol.com/public_html/Imagenes';
-//const IMAGE_URL_BASE = 'https://odontologiacarol.com/Imagenes/';
 
 
 // Configuración para almacenar temporalmente las imágenes
