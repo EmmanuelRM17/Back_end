@@ -18,6 +18,7 @@ const FTP_CONFIG = {
 };
 //Directorio de imágenes en tu servidor Hostinger (ruta completa)
 //const FTP_IMG_DIR = '/home/u478151766/domains/odontologiacarol.com/public_html/Imagenes';
+const FTP_IMG_DIR = 'public_html/Imagenes';
 const IMAGE_URL_BASE = 'https://odontologiacarol.com/Imagenes/';
 
 
@@ -70,13 +71,13 @@ async function connectToFTP() {
     }
 }
 
-// Función para verificar y crear el directorio si no existe
+// Función corregida para evitar duplicación
 async function ensureDirectoryExists(client) {
     try {
-        // Usar rutas relativas sin barra inicial
+        // Sin barra inicial
         await client.ensureDir('public_html/Imagenes');
-        
-        // Volver al directorio raíz
+
+        // Volver al directorio raíz (mantener la barra aquí sí es correcto)
         await client.cd('/');
         return true;
     } catch (error) {
@@ -84,6 +85,7 @@ async function ensureDirectoryExists(client) {
         return false;
     }
 }
+
 /**
  * @route   GET /api/imagenes/test-ftp
  * @desc    Probar conexión con servidor FTP
