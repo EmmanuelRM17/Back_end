@@ -1,11 +1,11 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../db');
+const db = require('../db'); // Ya es un pool con promesas
 const logger = require('../utils/logger');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const ftp = require('basic-ftp'); // Necesitas instalarlo: npm install basic-ftp
+const ftp = require('basic-ftp'); // Asegúrate de instalarlo: npm install basic-ftp
 
 // Configuración de FTP para Hostinger
 const FTP_CONFIG = {
@@ -196,7 +196,7 @@ router.post('/upload-ftp', upload.single('image'), async (req, res) => {
       error: error.message
     });
   } finally {
-    if (client) client.close();
+    if (client && client.close) client.close();
   }
 });
 
@@ -254,7 +254,7 @@ router.delete('/eliminar-ftp', async (req, res) => {
       error: error.message
     });
   } finally {
-    if (client) client.close();
+    if (client && client.close) client.close();
   }
 });
 
@@ -418,6 +418,80 @@ router.delete('/remover/:id', async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'Error al remover la imagen',
+      error: error.message
+    });
+  }
+});
+
+/**
+ * @route   GET /api/imagenes/:filename
+ * @desc    Servir una imagen directamente desde el servidor
+ * @access  Public
+ */
+router.get('/:filename', async (req, res) => {
+  const { filename } = req.params;
+  
+  try {
+    // Comprobar si el archivo existe en el servidor local
+    const filePath = path.join(__dirname, '../temp/imagenes', filename);
+    
+    if (fs.existsSync(filePath)) {
+      // Determinar el tipo MIME basado en la extensión
+      const ext = path.extname(filename).toLowerCase();
+      let contentType = 'application/octet-stream'; // Por defecto
+      
+      if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+      else if (ext === '.png') contentType = 'image/png';
+      else if (ext === '.gif') contentType = 'image/gif';
+      else if (ext === '.webp') contentType = 'image/webp';
+      
+      // Establecer el tipo de contenido y enviar el archivo
+      res.setHeader('Content-Type', contentType);
+      fs.createReadStream(filePath).pipe(res);
+    } else {
+      // Si no está disponible localmente, intentar descargarlo desde FTP
+      const tempFilePath = path.join(__dirname, '../temp/temp_download', filename);
+      
+      // Crear directorio temporal si no existe
+      if (!fs.existsSync(path.dirname(tempFilePath))) {
+        fs.mkdirSync(path.dirname(tempFilePath), { recursive: true });
+      }
+      
+      // Conectar a FTP y descargar
+      const client = await connectToFTP();
+      try {
+        await client.downloadTo(tempFilePath, `${FTP_IMG_DIR}/${filename}`);
+        client.close();
+        
+        // Determinar el tipo MIME
+        const ext = path.extname(filename).toLowerCase();
+        let contentType = 'application/octet-stream'; // Por defecto
+        
+        if (ext === '.jpg' || ext === '.jpeg') contentType = 'image/jpeg';
+        else if (ext === '.png') contentType = 'image/png';
+        else if (ext === '.gif') contentType = 'image/gif';
+        else if (ext === '.webp') contentType = 'image/webp';
+        
+        // Establecer el tipo de contenido y enviar el archivo
+        res.setHeader('Content-Type', contentType);
+        fs.createReadStream(tempFilePath).pipe(res);
+        
+        // Opcionalmente, eliminar el archivo temporal después
+        // fs.unlinkSync(tempFilePath);
+      } catch (error) {
+        client.close();
+        logger.error(`Imagen no encontrada: ${filename}`);
+        res.status(404).json({
+          success: false,
+          message: 'Imagen no encontrada'
+        });
+      }
+    }
+  } catch (error) {
+    logger.error(`Error al servir la imagen ${filename}:`, error);
+    res.status(500).json({
+      success: false,
+      message: 'Error al servir la imagen',
       error: error.message
     });
   }
