@@ -121,16 +121,16 @@ router.get('/ftp-list', async (req, res) => {
 
         // Listar archivos en el directorio de imágenes
         const fileList = await client.list(FTP_IMG_DIR);
-        client.close();
-
         console.log('fileList completo:', fileList);
-
+        client.close();
         // Filtrar solo archivos de imágenes
         const imageExtensions = ['.jpg', '.jpeg', '.png', '.gif', '.webp'];
+
         const imageFiles = fileList.filter(file =>
-            !file.isDirectory &&
-            imageExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
+          !file.isDirectory &&
+          imageExtensions.some(ext => file.name.toLowerCase().endsWith(ext))
         );
+        
 
         logger.info(`Se encontraron ${imageFiles.length} imágenes en el servidor FTP`);
         res.json({
