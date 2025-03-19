@@ -74,21 +74,8 @@ async function connectToFTP() {
 // Función para verificar y crear el directorio si no existe
 async function ensureDirectoryExists(client) {
     try {
-        // Verificar si existe el directorio principal
-        try {
-            await client.cd('/public_html');
-        } catch (error) {
-            // Si no existe, crearlo
-            await client.mkdir('/public_html');
-        }
-
-        // Verificar si existe el directorio de imágenes
-        try {
-            await client.cd('/public_html/Imagenes');
-        } catch (error) {
-            // Si no existe, crearlo
-            await client.mkdir('/public_html/Imagenes');
-        }
+        // La biblioteca basic-ftp usa ensureDir, no mkdir
+        await client.ensureDir('/public_html/Imagenes');
 
         // Volver al directorio raíz
         await client.cd('/');
