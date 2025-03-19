@@ -61,32 +61,26 @@ const upload = multer({
 async function connectToFTP() {
     const client = new ftp.Client();
     client.ftp.verbose = false;
-
-    try {
-        await client.access(FTP_CONFIG);
-        return client;
-    } catch (err) {
-        logger.error('Error al conectar con FTP:', err);
-        throw new Error('No se pudo conectar al servidor FTP');
-    }
-}
+    await client.access(FTP_CONFIG);
+  
+    const currentDir = await client.pwd();
+    console.log('Directorio actual tras conectarse:', currentDir);
+    // Ejemplo: puede ser "/" o "/home/usuario" o "/public_html" etc.
+    return client;
+  }
+  
 
 // Función corregida para evitar duplicación
 async function ensureDirectoryExists(client) {
     try {
-        // Ir a la raíz (o a donde comience tu usuario)
-        await client.cd('/');
-        // Asegurar directorio (ruta absoluta)
-        await client.ensureDir('/public_html/Imagenes');
-        // Cambiar al directorio que acabas de asegurar
-        await client.cd('/public_html/Imagenes');
-        return true;
+      await client.ensureDir(FTP_IMG_DIR);
+      return true;
     } catch (error) {
-        console.error('Error al crear directorio:', error);
-        return false;
+      console.error('Error al crear directorio:', error);
+      return false;
     }
-}
-
+  }
+  
 
 /**
  * @route   GET /api/imagenes/test-ftp
@@ -182,7 +176,7 @@ router.post('/upload-ftp', upload.single('image'), async (req, res) => {
         // Conectar al servidor FTP y subir el archivo
         client = await connectToFTP();
         await ensureDirectoryExists(client);
-        await client.uploadFrom(req.file.path, filename);
+        await client.uploadFrom(req.file.path, `${FTP_IMG_DIR}/${filename}`);        
         
         client.close();
 
