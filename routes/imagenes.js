@@ -71,20 +71,6 @@ async function connectToFTP() {
     }
 }
 
-// Función corregida para evitar duplicación
-async function ensureDirectoryExists(client) {
-    try {
-        // Sin barra inicial
-        await client.ensureDir('public_html/Imagenes');
-
-        // Volver al directorio raíz (mantener la barra aquí sí es correcto)
-        await client.cd('/');
-        return true;
-    } catch (error) {
-        console.error('Error al crear directorio:', error);
-        return false;
-    }
-}
 
 /**
  * @route   GET /api/imagenes/test-ftp
@@ -179,7 +165,8 @@ router.post('/upload-ftp', upload.single('image'), async (req, res) => {
 
         // Conectar al servidor FTP y subir el archivo
         client = await connectToFTP();
-        await ensureDirectoryExists(client);
+        await ensureDirectoryExists(client); // Esta función aún vuelve a la raíz con cd('/')
+        // Usar la ruta completa
         await client.uploadFrom(req.file.path, `${FTP_IMG_DIR}/${filename}`);
         client.close();
 
