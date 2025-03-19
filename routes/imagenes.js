@@ -238,7 +238,7 @@ router.delete('/eliminar-ftp', async (req, res) => {
     
     // Actualizar base de datos para eliminar referencias a esta imagen
     const imageUrl = `${IMAGE_URL_BASE}${filename}`;
-    await db.query('UPDATE services SET image_url = NULL, image_name = NULL WHERE image_url = ?', [imageUrl]);
+    await db.query('UPDATE servicios SET image_url = NULL, image_name = NULL WHERE image_url = ?', [imageUrl]);
     
     logger.info(`Imagen "${filename}" eliminada correctamente del servidor FTP`);
     
@@ -270,7 +270,7 @@ router.get('/resumen', async (req, res) => {
         COUNT(*) as total,
         SUM(CASE WHEN image_url IS NOT NULL THEN 1 ELSE 0 END) as con_imagen,
         SUM(CASE WHEN image_url IS NULL THEN 1 ELSE 0 END) as sin_imagen
-      FROM services
+      FROM servicios
     `);
     
     logger.info('Estadísticas de servicios obtenidas correctamente');
@@ -294,7 +294,7 @@ router.get('/all', async (req, res) => {
   try {
     const [results] = await db.query(`
       SELECT id, title, description, category, image_url, image_name
-      FROM services
+      FROM servicios
       WHERE image_url IS NOT NULL
       ORDER BY title
     `);
@@ -323,7 +323,7 @@ router.get('/pendientes', async (req, res) => {
   try {
     const [results] = await db.query(`
       SELECT id, title, description, category
-      FROM services
+      FROM servicios
       WHERE image_url IS NULL
       ORDER BY title
     `);
@@ -361,7 +361,7 @@ router.post('/asignar/:id', async (req, res) => {
   
   try {
     const [result] = await db.query(
-      'UPDATE services SET image_url = ?, image_name = ? WHERE id = ?',
+      'UPDATE servicios SET image_url = ?, image_name = ? WHERE id = ?',
       [imageUrl, name, id]
     );
     
@@ -397,7 +397,7 @@ router.delete('/remover/:id', async (req, res) => {
   
   try {
     const [result] = await db.query(
-      'UPDATE services SET image_url = NULL, image_name = NULL WHERE id = ?',
+      'UPDATE servicios SET image_url = NULL, image_name = NULL WHERE id = ?',
       [id]
     );
     
