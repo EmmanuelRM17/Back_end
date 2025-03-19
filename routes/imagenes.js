@@ -11,7 +11,7 @@ const ftp = require('basic-ftp');
 // Configuración de FTP para Hostinger (corregida)
 const FTP_CONFIG = {
     host: 'ftp.odontologiacarol.com', // Host correcto según tu imagen
-    user: 'u478151766.OdontologiaImg', // Usuario correcto según tu imagen
+    user: 'u478151766.Odontologialmg', // Usuario correcto según tu imagen
     password: 'sP8+?;Vs:', // Tu contraseña actual 
     secure: false,
     port: 21 // Puerto explícito según tu imagen
