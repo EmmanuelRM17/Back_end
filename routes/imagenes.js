@@ -1,39 +1,35 @@
 const express = require('express');
 const router = express.Router();
-const db = require('../db'); // Ya es un pool con promesas
+const db = require('../db'); // Pool sin promesas
 const logger = require('../utils/logger');
 const multer = require('multer');
 const fs = require('fs');
 const path = require('path');
-const ftp = require('basic-ftp'); // Asegúrate de instalarlo: npm install basic-ftp
+const ftp = require('basic-ftp');
 
-// Configuración de FTP para Hostinger
+// Configuración FTP
 const FTP_CONFIG = {
   host: 'ftp.odontologiacarol.com',
-  user: 'u478151766.Odontologialmg', // Tu usuario FTP
-  password: 'sP8+?;Vs:', // Tu contraseña FTP
-  secure: false // Cambia a true si usas FTPS
+  user: 'u478151766.Odontologialmg',
+  password: 'sP8+?;Vs:',
+  secure: false
 };
 
-// Directorio de imágenes en tu servidor Hostinger
+// Directorio de imágenes en Hostinger
 const FTP_IMG_DIR = '/Imagenes';
 const IMAGE_URL_BASE = 'https://odontologiacarol.com/Imagenes/';
 
-// Configuración para almacenar temporalmente las imágenes antes de subirlas por FTP
+// Configuración para almacenar temporalmente las imágenes
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    // Asegúrate de que este directorio exista en tu servidor
     const uploadDir = path.join(__dirname, '../temp/uploads');
-    // Crear directorio si no existe
     if (!fs.existsSync(uploadDir)) {
       fs.mkdirSync(uploadDir, { recursive: true });
     }
     cb(null, uploadDir);
   },
   filename: function (req, file, cb) {
-    // Genera un nombre seguro para el archivo
     const filename = file.originalname.replace(/[^\w\d\s.-]/g, '').replace(/\s+/g, '_');
-    // Asegura que sea único
     const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
     cb(null, uniqueSuffix + '-' + filename);
   }
@@ -61,7 +57,7 @@ const upload = multer({
 // Función para conectar al servidor FTP
 async function connectToFTP() {
   const client = new ftp.Client();
-  client.ftp.verbose = false; // Cambia a true para debugging
+  client.ftp.verbose = false;
   
   try {
     await client.access(FTP_CONFIG);
@@ -237,15 +233,27 @@ router.delete('/eliminar-ftp', async (req, res) => {
     client.close();
     
     // Actualizar base de datos para eliminar referencias a esta imagen
+    // Usando callback en lugar de await
     const imageUrl = `${IMAGE_URL_BASE}${filename}`;
-    await db.query('UPDATE servicios SET image_url = NULL, image_name = NULL WHERE image_url = ?', [imageUrl]);
-    
-    logger.info(`Imagen "${filename}" eliminada correctamente del servidor FTP`);
-    
-    res.json({
-      success: true,
-      message: 'Imagen eliminada correctamente'
-    });
+    db.query('UPDATE servicios SET image_url = NULL, image_name = NULL WHERE image_url = ?', 
+      [imageUrl], 
+      (err, result) => {
+        if (err) {
+          logger.error('Error al actualizar base de datos:', err);
+          return res.status(500).json({
+            success: false,
+            message: 'Error al eliminar la imagen del servidor',
+            error: err.message
+          });
+        }
+        
+        logger.info(`Imagen "${filename}" eliminada correctamente del servidor FTP`);
+        res.json({
+          success: true,
+          message: 'Imagen eliminada correctamente'
+        });
+      }
+    );
   } catch (error) {
     logger.error('Error al eliminar imagen de FTP:', error);
     res.status(500).json({
@@ -263,26 +271,28 @@ router.delete('/eliminar-ftp', async (req, res) => {
  * @desc    Obtener estadísticas de servicios con/sin imágenes
  * @access  Private
  */
-router.get('/resumen', async (req, res) => {
-  try {
-    const [results] = await db.query(`
-      SELECT
-        COUNT(*) as total,
-        SUM(CASE WHEN image_url IS NOT NULL THEN 1 ELSE 0 END) as con_imagen,
-        SUM(CASE WHEN image_url IS NULL THEN 1 ELSE 0 END) as sin_imagen
-      FROM servicios
-    `);
+router.get('/resumen', (req, res) => {
+  const query = `
+    SELECT
+      COUNT(*) as total,
+      SUM(CASE WHEN image_url IS NOT NULL THEN 1 ELSE 0 END) as con_imagen,
+      SUM(CASE WHEN image_url IS NULL THEN 1 ELSE 0 END) as sin_imagen
+    FROM servicios
+  `;
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      logger.error('Error al obtener resumen de servicios:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Error al obtener las estadísticas',
+        error: err.message
+      });
+    }
     
     logger.info('Estadísticas de servicios obtenidas correctamente');
     res.json(results[0] || { total: 0, con_imagen: 0, sin_imagen: 0 });
-  } catch (error) {
-    logger.error('Error al obtener resumen de servicios:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener las estadísticas',
-      error: error.message
-    });
-  }
+  });
 });
 
 /**
@@ -290,28 +300,30 @@ router.get('/resumen', async (req, res) => {
  * @desc    Obtener todos los servicios con imágenes
  * @access  Private
  */
-router.get('/all', async (req, res) => {
-  try {
-    const [results] = await db.query(`
-      SELECT id, title, description, category, image_url, image_name
-      FROM servicios
-      WHERE image_url IS NOT NULL
-      ORDER BY title
-    `);
+router.get('/all', (req, res) => {
+  const query = `
+    SELECT id, title, description, category, image_url, image_name
+    FROM servicios
+    WHERE image_url IS NOT NULL
+    ORDER BY title
+  `;
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      logger.error('Error al obtener servicios con imágenes:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Error al obtener los servicios',
+        error: err.message
+      });
+    }
     
     logger.info(`Se encontraron ${results.length} servicios con imágenes`);
     res.json({
       success: true,
       data: results
     });
-  } catch (error) {
-    logger.error('Error al obtener servicios con imágenes:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener los servicios',
-      error: error.message
-    });
-  }
+  });
 });
 
 /**
@@ -319,28 +331,30 @@ router.get('/all', async (req, res) => {
  * @desc    Obtener servicios sin imágenes
  * @access  Private
  */
-router.get('/pendientes', async (req, res) => {
-  try {
-    const [results] = await db.query(`
-      SELECT id, title, description, category
-      FROM servicios
-      WHERE image_url IS NULL
-      ORDER BY title
-    `);
+router.get('/pendientes', (req, res) => {
+  const query = `
+    SELECT id, title, description, category
+    FROM servicios
+    WHERE image_url IS NULL
+    ORDER BY title
+  `;
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      logger.error('Error al obtener servicios sin imágenes:', err);
+      return res.status(500).json({
+        success: false,
+        message: 'Error al obtener los servicios',
+        error: err.message
+      });
+    }
     
     logger.info(`Se encontraron ${results.length} servicios sin imágenes`);
     res.json({
       success: true,
       data: results
     });
-  } catch (error) {
-    logger.error('Error al obtener servicios sin imágenes:', error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al obtener los servicios',
-      error: error.message
-    });
-  }
+  });
 });
 
 /**
@@ -348,7 +362,7 @@ router.get('/pendientes', async (req, res) => {
  * @desc    Asignar una imagen a un servicio
  * @access  Private
  */
-router.post('/asignar/:id', async (req, res) => {
+router.post('/asignar/:id', (req, res) => {
   const { id } = req.params;
   const { imageUrl, name } = req.body;
   
@@ -359,11 +373,18 @@ router.post('/asignar/:id', async (req, res) => {
     });
   }
   
-  try {
-    const [result] = await db.query(
-      'UPDATE servicios SET image_url = ?, image_name = ? WHERE id = ?',
-      [imageUrl, name, id]
-    );
+  const query = 'UPDATE servicios SET image_url = ?, image_name = ? WHERE id = ?';
+  const params = [imageUrl, name, id];
+  
+  db.query(query, params, (err, result) => {
+    if (err) {
+      logger.error(`Error al asignar imagen al servicio ID ${id}:`, err);
+      return res.status(500).json({
+        success: false,
+        message: 'Error al asignar la imagen',
+        error: err.message
+      });
+    }
     
     if (result.affectedRows === 0) {
       return res.status(404).json({
@@ -377,14 +398,7 @@ router.post('/asignar/:id', async (req, res) => {
       success: true,
       message: 'Imagen asignada correctamente'
     });
-  } catch (error) {
-    logger.error(`Error al asignar imagen al servicio ID ${id}:`, error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al asignar la imagen',
-      error: error.message
-    });
-  }
+  });
 });
 
 /**
@@ -392,14 +406,20 @@ router.post('/asignar/:id', async (req, res) => {
  * @desc    Remover imagen de un servicio
  * @access  Private
  */
-router.delete('/remover/:id', async (req, res) => {
+router.delete('/remover/:id', (req, res) => {
   const { id } = req.params;
   
-  try {
-    const [result] = await db.query(
-      'UPDATE servicios SET image_url = NULL, image_name = NULL WHERE id = ?',
-      [id]
-    );
+  const query = 'UPDATE servicios SET image_url = NULL, image_name = NULL WHERE id = ?';
+  
+  db.query(query, [id], (err, result) => {
+    if (err) {
+      logger.error(`Error al remover imagen del servicio ID ${id}:`, err);
+      return res.status(500).json({
+        success: false,
+        message: 'Error al remover la imagen',
+        error: err.message
+      });
+    }
     
     if (result.affectedRows === 0) {
       return res.status(404).json({
@@ -413,14 +433,7 @@ router.delete('/remover/:id', async (req, res) => {
       success: true,
       message: 'Imagen removida correctamente'
     });
-  } catch (error) {
-    logger.error(`Error al remover imagen del servicio ID ${id}:`, error);
-    res.status(500).json({
-      success: false,
-      message: 'Error al remover la imagen',
-      error: error.message
-    });
-  }
+  });
 });
 
 /**
