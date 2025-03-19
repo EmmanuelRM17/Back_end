@@ -18,7 +18,7 @@ const FTP_CONFIG = {
 };
 //Directorio de imágenes en tu servidor Hostinger (ruta completa)
 //const FTP_IMG_DIR = '/home/u478151766/domains/odontologiacarol.com/public_html/Imagenes';
-const FTP_IMG_DIR = 'public_html/Imagenes';
+const FTP_IMG_DIR = 'Imagenes';
 const IMAGE_URL_BASE = 'https://odontologiacarol.com/Imagenes/';
 
 
@@ -62,38 +62,28 @@ async function connectToFTP() {
     const client = new ftp.Client();
     client.ftp.verbose = false;
     await client.access(FTP_CONFIG);
-  
+
     const currentDir = await client.pwd();
     console.log('Directorio actual tras conectarse:', currentDir);
     // Ejemplo: puede ser "/" o "/home/usuario" o "/public_html" etc.
     return client;
-  }
-  
+}
+
 
 // Función corregida para evitar duplicación
 async function ensureDirectoryExists(client) {
     try {
-      // Primero saber dónde estás:
-      const dirActual = await client.pwd();
-      console.log('pwd inicial:', dirActual);
-  
-      // Si tu FTP arranca en '/', haz:
-      await client.cd('/public_html/Imagenes');
-  
-      // Opcionalmente, si quieres crearlo si no existe:
-      // await client.ensureDir('/public_html/Imagenes');
-  
-      // Comprueba dónde terminaste:
-      const dirFinal = await client.pwd();
-      console.log('pwd final:', dirFinal);
-  
-      return true;
+        // Como ya estás en /public_html, aseguras la carpeta "Imagenes"
+        await client.ensureDir(FTP_IMG_DIR);
+        // Cámbiate a esa carpeta para que la subida sea relativa
+        await client.cd(FTP_IMG_DIR);
+        return true;
     } catch (error) {
-      console.error('Error al crear directorio:', error);
-      return false;
+        console.error('Error al crear directorio:', error);
+        return false;
     }
-  }
-  
+}
+
 /**
  * @route   GET /api/imagenes/test-ftp
  * @desc    Probar conexión con servidor FTP
@@ -188,8 +178,8 @@ router.post('/upload-ftp', upload.single('image'), async (req, res) => {
         // Conectar al servidor FTP y subir el archivo
         client = await connectToFTP();
         await ensureDirectoryExists(client);
-        await client.uploadFrom(req.file.path, filename);     
-        
+        await client.uploadFrom(req.file.path, filename);
+
         client.close();
 
         // Registrar éxito
