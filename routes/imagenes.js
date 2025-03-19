@@ -71,12 +71,14 @@ async function connectToFTP() {
     }
 }
 
-// Función para asegurar que el directorio existe
+// Función corregida para evitar duplicación
 async function ensureDirectoryExists(client) {
     try {
-        // Navegar al directorio y asegurar que existe
+        // Sin barra inicial
         await client.ensureDir('public_html/Imagenes');
-        // No volver al directorio raíz
+        
+        // Volver al directorio raíz (mantener la barra aquí sí es correcto)
+        await client.cd('/');
         return true;
     } catch (error) {
         console.error('Error al crear directorio:', error);
