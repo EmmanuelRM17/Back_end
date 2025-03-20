@@ -14,7 +14,7 @@ const daysMap = {
     6: 'Sábado'
 };
 
-// Obtener horarios disponibles para un odontólogo en una fecha específica
+// Actualización del endpoint de disponibilidad
 router.get('/disponibilidad', async (req, res) => {
     const { odontologo_id, fecha } = req.query;
 
@@ -25,88 +25,106 @@ router.get('/disponibilidad', async (req, res) => {
     try {
         // Convertir la fecha a día de la semana con el formato correcto
         const diaSemana = daysMap[new Date(fecha).getDay()];
-
-        // 1. Obtener todas las franjas horarias para ese día y odontólogo
-        const sqlFranjas = `
-            SELECT h.id AS horario_id, h.hora_inicio, h.hora_fin, h.duracion 
-            FROM horarios h 
-            WHERE h.empleado_id = ? 
-            AND h.dia_semana = ?
-            ORDER BY h.hora_inicio;
+        
+        // 1. Primero obtenemos todas las citas ya programadas para esa fecha y dentista
+        const sqlCitas = `
+            SELECT 
+                DATE_FORMAT(fecha_consulta, '%H:%i') as hora_cita
+            FROM 
+                citas 
+            WHERE 
+                odontologo_id = ? 
+                AND DATE(fecha_consulta) = ? 
+                AND estado NOT IN ('Cancelada')
         `;
 
-        db.query(sqlFranjas, [odontologo_id, diaSemana], (err, franjas) => {
-            if (err) {
-                logger.error('Error al obtener franjas horarias:', err);
-                return res.status(500).json({ message: 'Error al obtener disponibilidad.' });
+        db.query(sqlCitas, [odontologo_id, fecha], (errCitas, citasExistentes) => {
+            if (errCitas) {
+                logger.error('Error al obtener citas existentes:', errCitas);
+                return res.status(500).json({ message: 'Error al verificar citas existentes.' });
             }
 
-            if (franjas.length === 0) {
-                return res.status(404).json({ message: 'No hay horarios disponibles para la fecha seleccionada.' });
-            }
+            // Crear un mapa de horas ocupadas para búsqueda rápida
+            const horasOcupadas = {};
+            citasExistentes.forEach(cita => {
+                horasOcupadas[cita.hora_cita] = true;
+            });
 
-            // 2. Obtener citas existentes para esa fecha y odontólogo
-            const sqlCitas = `
-                SELECT c.fecha_consulta, 
-                       TIME_FORMAT(c.fecha_consulta, '%H:%i') AS hora_cita,
-                       h.duracion
-                FROM citas c
-                JOIN horarios h ON c.horario_id = h.id
-                WHERE c.odontologo_id = ? 
-                AND DATE(c.fecha_consulta) = ?
-                AND c.estado NOT IN ('Cancelada')
+            console.log('Horas ocupadas encontradas:', horasOcupadas);
+
+            // 2. Obtenemos las franjas horarias disponibles para ese día
+            const sqlFranjas = `
+                SELECT 
+                    h.id AS horario_id, 
+                    h.hora_inicio, 
+                    h.hora_fin, 
+                    h.duracion 
+                FROM 
+                    horarios h 
+                WHERE 
+                    h.empleado_id = ? 
+                    AND h.dia_semana = ?
+                ORDER BY 
+                    h.hora_inicio
             `;
 
-            db.query(sqlCitas, [odontologo_id, fecha], (err, citasExistentes) => {
-                if (err) {
-                    logger.error('Error al obtener citas existentes:', err);
-                    return res.status(500).json({ message: 'Error al verificar citas existentes.' });
+            db.query(sqlFranjas, [odontologo_id, diaSemana], (errFranjas, franjas) => {
+                if (errFranjas) {
+                    logger.error('Error al obtener franjas horarias:', errFranjas);
+                    return res.status(500).json({ message: 'Error al obtener horarios disponibles.' });
                 }
 
-                // Crear un mapa de slots ocupados para búsqueda rápida
-                const slotsOcupados = {};
-                citasExistentes.forEach(cita => {
-                    slotsOcupados[cita.hora_cita] = true;
-                });
+                if (!franjas.length) {
+                    return res.status(404).json({ message: 'No hay horarios disponibles para la fecha seleccionada.' });
+                }
 
-                // 3. Calcular slots disponibles para cada franja
+                // 3. Generamos los slots de tiempo para cada franja
                 const resultado = [];
 
                 franjas.forEach(franja => {
-                    // Parsear horas de inicio y fin
-                    const horaInicio = parseTime(franja.hora_inicio);
-                    const horaFin = parseTime(franja.hora_fin);
-                    const duracion = franja.duracion;
+                    // Creamos objeto Date para manipular horas
+                    let horaInicio = franja.hora_inicio;
+                    let horaFin = franja.hora_fin;
+                    const duracion = franja.duracion || 30;
 
-                    if (!horaInicio || !horaFin) {
-                        logger.error(`Formato de hora inválido: inicio=${franja.hora_inicio}, fin=${franja.hora_fin}`);
-                        return; // Saltar esta franja
+                    // Normalizar formato de hora
+                    if (typeof horaInicio === 'object') {
+                        horaInicio = horaInicio.toTimeString().slice(0, 5);
+                    } else if (horaInicio.length > 5) {
+                        horaInicio = horaInicio.slice(0, 5);
                     }
 
+                    if (typeof horaFin === 'object') {
+                        horaFin = horaFin.toTimeString().slice(0, 5);
+                    } else if (horaFin.length > 5) {
+                        horaFin = horaFin.slice(0, 5);
+                    }
+
+                    // Convertir a objetos Date para cálculos
+                    const inicio = new Date(`${fecha}T${horaInicio}`);
+                    const fin = new Date(`${fecha}T${horaFin}`);
+                    
+                    // Ajustar el fin para que la última cita quepa completa
+                    const finAjustado = new Date(fin);
+                    finAjustado.setMinutes(finAjustado.getMinutes() - duracion);
+
+                    // Generar todos los slots posibles
                     const franjaProcesada = {
                         horario_id: franja.horario_id,
-                        hora_inicio: franja.hora_inicio,
-                        hora_fin: franja.hora_fin,
+                        hora_inicio: horaInicio,
+                        hora_fin: horaFin,
                         duracion: duracion,
                         slots_disponibles: {}
                     };
 
-                    // Calcular todos los slots posibles en esta franja
-                    const slots = [];
-                    let currentTime = new Date(horaInicio);
-                    const finTime = new Date(horaFin);
-
-                    // Ajustar finTime para que la última cita pueda completarse
-                    finTime.setMinutes(finTime.getMinutes() - duracion);
-
-                    // Generar todos los slots posibles en la franja
-                    while (currentTime <= finTime) {
-                        const timeSlot = formatTime(currentTime);
-
-                        // Verificar si este slot ya está ocupado
-                        const disponible = !slotsOcupados[timeSlot];
-                        franjaProcesada.slots_disponibles[timeSlot] = disponible;
-
+                    // Generar todos los slots dentro de la franja
+                    let currentTime = new Date(inicio);
+                    while (currentTime <= finAjustado) {
+                        const timeSlot = `${String(currentTime.getHours()).padStart(2, '0')}:${String(currentTime.getMinutes()).padStart(2, '0')}`;
+                        
+                        // Verificar si este slot YA ESTÁ OCUPADO
+                        franjaProcesada.slots_disponibles[timeSlot] = !horasOcupadas[timeSlot];
+                        
                         // Avanzar al siguiente slot
                         currentTime.setMinutes(currentTime.getMinutes() + duracion);
                     }
@@ -118,11 +136,10 @@ router.get('/disponibilidad', async (req, res) => {
             });
         });
     } catch (error) {
-        logger.error('Error en la ruta /horarios/disponibilidad:', error);
+        logger.error('Error en /horarios/disponibilidad:', error);
         res.status(500).json({ message: 'Error en el servidor.' });
     }
 });
-
 function parseTime(timeStr) {
     if (!timeStr) return null;
 
