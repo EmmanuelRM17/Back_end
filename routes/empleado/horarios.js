@@ -436,6 +436,7 @@ router.post('/create-multiple', (req, res) => {
 });
 
 // Añadir 
+// Endpoint mejorado para obtener citas por fecha y odontólogo
 router.get('/por_fecha', async (req, res) => {
     const { fecha, odontologo_id } = req.query;
     
@@ -444,8 +445,16 @@ router.get('/por_fecha', async (req, res) => {
     }
     
     try {
+      // Consulta modificada para devolver explícitamente la hora formateada
       let sql = `
-        SELECT * 
+        SELECT 
+          id,
+          odontologo_id, 
+          fecha_consulta,
+          DATE(fecha_consulta) AS fecha_solo,
+          TIME_FORMAT(fecha_consulta, '%H:%i') AS hora_cita,
+          estado,
+          horario_id
         FROM citas 
         WHERE DATE(fecha_consulta) = ? 
         AND estado NOT IN ('Cancelada')
@@ -459,10 +468,25 @@ router.get('/por_fecha', async (req, res) => {
         params.push(odontologo_id);
       }
       
+      console.log('Ejecutando consulta de citas con params:', params);
+      
       db.query(sql, params, (err, result) => {
         if (err) {
           console.error('Error al obtener citas por fecha:', err);
           return res.status(500).json({ message: 'Error al obtener citas' });
+        }
+        
+        console.log(`Se encontraron ${result.length} citas para la fecha ${fecha}`);
+        
+        // Log para depuración
+        if (result.length > 0) {
+          console.log('Primera cita encontrada:', {
+            id: result[0].id,
+            odontologo_id: result[0].odontologo_id,
+            fecha_consulta: result[0].fecha_consulta,
+            hora_cita: result[0].hora_cita,
+            estado: result[0].estado
+          });
         }
         
         res.json(result);
