@@ -435,5 +435,42 @@ router.post('/create-multiple', (req, res) => {
     }
 });
 
+// Añadir 
+router.get('/por_fecha', async (req, res) => {
+    const { fecha, odontologo_id } = req.query;
+    
+    if (!fecha) {
+      return res.status(400).json({ message: 'Se requiere una fecha' });
+    }
+    
+    try {
+      let sql = `
+        SELECT * 
+        FROM citas 
+        WHERE DATE(fecha_consulta) = ? 
+        AND estado NOT IN ('Cancelada')
+      `;
+      
+      const params = [fecha];
+      
+      // Si se proporciona un odontólogo específico, filtrar por él
+      if (odontologo_id) {
+        sql += ' AND odontologo_id = ?';
+        params.push(odontologo_id);
+      }
+      
+      db.query(sql, params, (err, result) => {
+        if (err) {
+          console.error('Error al obtener citas por fecha:', err);
+          return res.status(500).json({ message: 'Error al obtener citas' });
+        }
+        
+        res.json(result);
+      });
+    } catch (error) {
+      console.error('Error general en /por_fecha:', error);
+      res.status(500).json({ message: 'Error del servidor' });
+    }
+  });
 
 module.exports = router;
