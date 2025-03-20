@@ -26,33 +26,157 @@ router.get('/disponibilidad', async (req, res) => {
         // Convertir la fecha a día de la semana con el formato correcto
         const diaSemana = daysMap[new Date(fecha).getDay()];
 
-        const sql = `
+        // 1. Obtener todas las franjas horarias para ese día y odontólogo
+        const sqlFranjas = `
             SELECT h.id AS horario_id, h.hora_inicio, h.hora_fin, h.duracion 
             FROM horarios h 
-            LEFT JOIN citas c ON c.horario_id = h.id AND DATE(c.fecha_consulta) = ?
             WHERE h.empleado_id = ? 
             AND h.dia_semana = ?
-            AND (c.id IS NULL OR c.estado IN ('Cancelada', 'Completada'))
             ORDER BY h.hora_inicio;
         `;
 
-        db.query(sql, [fecha, odontologo_id, diaSemana], (err, result) => {
+        db.query(sqlFranjas, [odontologo_id, diaSemana], (err, franjas) => {
             if (err) {
-                logger.error('Error al obtener horarios disponibles:', err);
+                logger.error('Error al obtener franjas horarias:', err);
                 return res.status(500).json({ message: 'Error al obtener disponibilidad.' });
             }
 
-            if (result.length === 0) {
+            if (franjas.length === 0) {
                 return res.status(404).json({ message: 'No hay horarios disponibles para la fecha seleccionada.' });
             }
 
-            res.status(200).json(result);
+            // 2. Obtener citas existentes para esa fecha y odontólogo
+            const sqlCitas = `
+                SELECT c.fecha_consulta, 
+                       TIME_FORMAT(c.fecha_consulta, '%H:%i') AS hora_cita,
+                       h.duracion
+                FROM citas c
+                JOIN horarios h ON c.horario_id = h.id
+                WHERE c.odontologo_id = ? 
+                AND DATE(c.fecha_consulta) = ?
+                AND c.estado NOT IN ('Cancelada')
+            `;
+
+            db.query(sqlCitas, [odontologo_id, fecha], (err, citasExistentes) => {
+                if (err) {
+                    logger.error('Error al obtener citas existentes:', err);
+                    return res.status(500).json({ message: 'Error al verificar citas existentes.' });
+                }
+
+                // Crear un mapa de slots ocupados para búsqueda rápida
+                const slotsOcupados = {};
+                citasExistentes.forEach(cita => {
+                    slotsOcupados[cita.hora_cita] = true;
+                });
+
+                // 3. Calcular slots disponibles para cada franja
+                const resultado = [];
+
+                franjas.forEach(franja => {
+                    // Parsear horas de inicio y fin
+                    const horaInicio = parseTime(franja.hora_inicio);
+                    const horaFin = parseTime(franja.hora_fin);
+                    const duracion = franja.duracion;
+
+                    if (!horaInicio || !horaFin) {
+                        logger.error(`Formato de hora inválido: inicio=${franja.hora_inicio}, fin=${franja.hora_fin}`);
+                        return; // Saltar esta franja
+                    }
+
+                    const franjaProcesada = {
+                        horario_id: franja.horario_id,
+                        hora_inicio: franja.hora_inicio,
+                        hora_fin: franja.hora_fin,
+                        duracion: duracion,
+                        slots_disponibles: {}
+                    };
+
+                    // Calcular todos los slots posibles en esta franja
+                    const slots = [];
+                    let currentTime = new Date(horaInicio);
+                    const finTime = new Date(horaFin);
+
+                    // Ajustar finTime para que la última cita pueda completarse
+                    finTime.setMinutes(finTime.getMinutes() - duracion);
+
+                    // Generar todos los slots posibles en la franja
+                    while (currentTime <= finTime) {
+                        const timeSlot = formatTime(currentTime);
+
+                        // Verificar si este slot ya está ocupado
+                        const disponible = !slotsOcupados[timeSlot];
+                        franjaProcesada.slots_disponibles[timeSlot] = disponible;
+
+                        // Avanzar al siguiente slot
+                        currentTime.setMinutes(currentTime.getMinutes() + duracion);
+                    }
+
+                    resultado.push(franjaProcesada);
+                });
+
+                res.status(200).json(resultado);
+            });
         });
     } catch (error) {
         logger.error('Error en la ruta /horarios/disponibilidad:', error);
         res.status(500).json({ message: 'Error en el servidor.' });
     }
 });
+
+function parseTime(timeStr) {
+    if (!timeStr) return null;
+
+    // Si ya es un objeto Date, devolverlo
+    if (timeStr instanceof Date) return timeStr;
+
+    // Normalizar el formato de hora
+    let normalizedTime = timeStr;
+    if (timeStr.length === 5) { // Formato HH:MM
+        normalizedTime = `${timeStr}:00`;
+    }
+
+    // Crear un objeto Date con la fecha actual y la hora especificada
+    const today = new Date();
+    const [hours, minutes, seconds] = normalizedTime.split(':').map(Number);
+
+    const date = new Date(today.getFullYear(), today.getMonth(), today.getDate(), hours, minutes, seconds || 0);
+    return isNaN(date) ? null : date;
+}
+
+function formatTime(date) {
+    if (!date || !(date instanceof Date) || isNaN(date)) return null;
+    return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`;
+}
+
+// Endpoint para verificar citas existentes en una fecha específica
+router.get('/verificar', (req, res) => {
+    const { odontologo_id, fecha } = req.query;
+
+    if (!odontologo_id || !fecha) {
+        return res.status(400).json({ message: 'Se requiere odontologo_id y fecha' });
+    }
+
+    const sql = `
+        SELECT TIME_FORMAT(c.fecha_consulta, '%H:%i') AS hora_cita,
+               h.duracion,
+               c.estado
+        FROM citas c
+        JOIN horarios h ON c.horario_id = h.id
+        WHERE c.odontologo_id = ? 
+        AND DATE(c.fecha_consulta) = ? 
+        AND c.estado NOT IN ('Cancelada')
+    `;
+
+    db.query(sql, [odontologo_id, fecha], (err, results) => {
+        if (err) {
+            logger.error('Error al verificar citas:', err);
+            return res.status(500).json({ message: 'Error al verificar citas' });
+        }
+
+        res.json(results);
+    });
+});
+
 
 // Obtener los días laborales dinámicamente para un odontólogo
 router.get('/dias_laborales', async (req, res) => {
