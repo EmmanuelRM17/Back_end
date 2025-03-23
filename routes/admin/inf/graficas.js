@@ -31,7 +31,7 @@ router.get("/ingresos-mensuales", async (req, res) => {
     const query = `
       SELECT 
         MONTH(p.fecha_pago) AS mes,
-        SUM(p.monto) AS total_ingresos
+        CAST(SUM(p.monto) AS DECIMAL(10,2)) AS total_ingresos
       FROM 
         pagos p
       WHERE 
