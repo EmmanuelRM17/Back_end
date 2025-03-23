@@ -93,7 +93,7 @@ router.get("/proximas-citas", async (req, res) => {
       SELECT 
         c.id,
         p.nombre,
-        p.apellido_paterno,
+        p.aPaterno,
         c.servicio_nombre,
         c.fecha_consulta,
         c.estado
@@ -146,8 +146,8 @@ router.get("/metricas-resumen", async (req, res) => {
     const queryNuevosPacientes = `
       SELECT COUNT(*) AS total
       FROM pacientes
-      WHERE MONTH(fecha_nacimiento) = MONTH(CURRENT_DATE())
-      AND YEAR(fecha_nacimiento) = YEAR(CURRENT_DATE());
+      WHERE MONTH(fecha_creacion) = MONTH(CURRENT_DATE())
+      AND YEAR(fecha_creacion) = YEAR(CURRENT_DATE());
     `;
     
     // Consulta para obtener ingresos de la semana
@@ -219,5 +219,4 @@ router.get("/metricas-resumen", async (req, res) => {
     res.status(500).json({ error: "Error en el servidor" });
   }
 });
-
 module.exports = router;
