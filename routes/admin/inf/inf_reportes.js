@@ -110,22 +110,7 @@ router.post("/update-config", async (req, res) => {
 router.get("/pacientes", async (_req, res) => {
   try {
     const query = `
-      SELECT 
-        id,
-        nombre,
-        aPaterno,
-        aMaterno,
-        fechaNacimiento,
-        fecha_creacion,
-        nombreTutor,
-        genero,
-        lugar,
-        telefono,
-        email,
-        alergias,
-        estado,
-        ultima_actualizacion
-      FROM pacientes
+      SELECT * FROM pacientes
     `;
 
     db.query(query, (err, results) => {

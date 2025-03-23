@@ -1339,4 +1339,47 @@ router.put('/incrementarCitas/:id', async (req, res) => {
     }
 });
 
+// Endpoint para obtener las citas por paciente
+router.get("/paciente/:id", async (req, res) => {
+    try {
+        const { id } = req.params;
+        const query = `
+        SELECT 
+          c.id,
+          c.paciente_id,
+          c.odontologo_id,
+          c.odontologo_nombre,
+          c.servicio_id,
+          c.servicio_nombre,
+          c.categoria_servicio,
+          c.precio_servicio,
+          c.fecha_consulta,
+          c.estado,
+          c.notas,
+          c.horario_id,
+          c.fecha_solicitud,
+          c.archivado,
+          c.tratamiento_id,
+          c.numero_cita_tratamiento
+        FROM 
+          citas c
+        WHERE 
+          c.paciente_id = ?
+        ORDER BY 
+          c.fecha_consulta DESC;
+      `;
+
+        db.query(query, [id], (err, results) => {
+            if (err) {
+                console.error(`Error al obtener citas del paciente #${id}:`, err);
+                return res.status(500).json({ error: "Error interno del servidor" });
+            }
+            res.json(results);
+        });
+    } catch (error) {
+        console.error("Error en la consulta:", error);
+        res.status(500).json({ error: "Error en el servidor" });
+    }
+});
+
 module.exports = router;

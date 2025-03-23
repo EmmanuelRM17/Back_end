@@ -65,6 +65,7 @@ const Empleados = require("./routes/empleado/empleados");
 const Horarios = require("./routes/empleado/horarios");
 const CalendarioCitas = require("./routes/admin/inf/calendarioCitas");
 const Graficas = require("./routes/admin/inf/graficas");
+const Finanzas = require("./routes/admin/inf/finanzas.js");
 const resenyas = require("./routes/admin/resenyasUsers");
 
 //pacientes
@@ -90,6 +91,7 @@ app.use("/api/preguntas", preguntas);
 app.use("/api/contacto",contactanos);
 app.use("/api/calendario",CalendarioCitas);
 app.use("/api/Graficas",Graficas);
+app.use("/api/Finanzas",Finanzas);
 app.use("/api/resenya" ,resenyas);
 
 //empleados
