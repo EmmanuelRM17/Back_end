@@ -1,8 +1,23 @@
+// rutas/empleados.js
 const express = require('express');
 const db = require('../../db');
 const router = express.Router();
 const logger = require('../../utils/logger');
-const bcrypt = require('bcrypt');
+const crypto = require('crypto'); // Módulo incorporado en Node.js
+
+// Función para generar hash de contraseña con crypto (reemplazo de bcrypt)
+function hashPassword(password) {
+  const salt = crypto.randomBytes(16).toString('hex');
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return `${salt}:${hash}`;
+}
+
+// Función para verificar contraseña (usado para autenticación, si es necesario)
+function verifyPassword(password, hashedPassword) {
+  const [salt, originalHash] = hashedPassword.split(':');
+  const hash = crypto.pbkdf2Sync(password, salt, 1000, 64, 'sha512').toString('hex');
+  return hash === originalHash;
+}
 
 // Obtener todos los empleados
 router.get('/all', async (req, res) => {
@@ -110,9 +125,8 @@ router.post('/', async (req, res) => {
       // Función para guardar el empleado una vez pasadas las validaciones
       async function procedeToSaveEmployee() {
         try {
-          // Hash de la contraseña
-          const saltRounds = 10;
-          const hashedPassword = await bcrypt.hash(password, saltRounds);
+          // Hash de la contraseña usando crypto en lugar de bcrypt
+          const hashedPassword = hashPassword(password);
           
           const currentDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
           
@@ -276,8 +290,7 @@ router.put('/:id', async (req, res) => {
           
           // Contraseña (solo si se proporciona una nueva)
           if (password && password.trim() !== '') {
-            const saltRounds = 10;
-            const hashedPassword = await bcrypt.hash(password, saltRounds);
+            const hashedPassword = hashPassword(password);
             updateFields.push('password = ?');
             updateValues.push(hashedPassword);
           }
