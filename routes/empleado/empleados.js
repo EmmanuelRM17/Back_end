@@ -63,121 +63,96 @@ router.post('/', async (req, res) => {
     try {
         const { nombre, aPaterno, aMaterno, email, password, puesto, estado, imagen, telefono } = req.body;
 
-        // Validaciones básicas
         if (!nombre || !aPaterno || !email || !password || !puesto) {
-            return res.status(400).json({
-                success: false,
-                message: 'Faltan campos obligatorios.'
-            });
+            return res.status(400).json({ success: false, message: 'Faltan campos obligatorios.' });
         }
 
-        // Verificar si el email ya está en uso
-        const checkEmailSql = 'SELECT id FROM empleados WHERE email = ?';
-        db.query(checkEmailSql, [email], async (err, result) => {
+        // Verificar si el email existe en empleados o administradores
+        const checkEmailSql = `
+            SELECT 'empleado' AS tipo FROM empleados WHERE email = ?
+            UNION
+            SELECT 'admin' AS tipo FROM administradores WHERE email = ?
+        `;
+        db.query(checkEmailSql, [email, email], async (err, result) => {
             if (err) {
                 logger.error('Error al verificar email:', err);
-                return res.status(500).json({
-                    success: false,
-                    message: 'Error al verificar disponibilidad del email.'
-                });
+                return res.status(500).json({ success: false, message: 'Error al verificar disponibilidad del email.' });
             }
 
             if (result.length > 0) {
-                return res.status(400).json({
-                    success: false,
-                    message: 'Este email ya está registrado.'
-                });
+                return res.status(400).json({ success: false, message: 'Este email ya está registrado en el sistema.' });
             }
 
-            // Verificar si ya existe un odontólogo activo (si el nuevo empleado es odontólogo)
+            // Verificación de odontólogo activo
             if (puesto === 'Odontólogo' && estado === 'activo') {
-                const checkOdontologoSql = 'SELECT id FROM empleados WHERE puesto = "Odontólogo" AND estado = "activo"';
+                const checkOdontologoSql = `SELECT id FROM empleados WHERE puesto = "Odontólogo" AND estado = "activo"`;
                 db.query(checkOdontologoSql, (err, result) => {
                     if (err) {
                         logger.error('Error al verificar odontólogos activos:', err);
-                        return res.status(500).json({
-                            success: false,
-                            message: 'Error al verificar odontólogos activos.'
-                        });
+                        return res.status(500).json({ success: false, message: 'Error al verificar odontólogos activos.' });
                     }
 
                     if (result.length > 0) {
-                        return res.status(400).json({
-                            success: false,
-                            message: 'Ya existe un Odontólogo activo.'
-                        });
+                        return res.status(400).json({ success: false, message: 'Ya existe un Odontólogo activo.' });
                     }
 
-                    // Si todo está bien, procedemos a guardar el nuevo empleado
                     procedeToSaveEmployee();
                 });
             } else {
-                // Si no es odontólogo o no está activo, procedemos directamente
                 procedeToSaveEmployee();
             }
 
-            // Función para guardar el empleado una vez pasadas las validaciones
             async function procedeToSaveEmployee() {
                 try {
-                    // Hash de la contraseña usando crypto en lugar de bcrypt
                     const hashedPassword = hashPassword(password);
-
                     const currentDate = new Date().toISOString().slice(0, 19).replace('T', ' ');
 
                     const insertSql = `
-          INSERT INTO empleados (nombre, aPaterno, aMaterno, email, password, puesto, estado, imagen, fecha_creacion, ultima_actualizacion, telefono)
-          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
-        `;
+                        INSERT INTO empleados 
+                        (nombre, aPaterno, aMaterno, email, password, puesto, estado, imagen, fecha_creacion, ultima_actualizacion, telefono)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+                    `;
+                    db.query(insertSql, [
+                        nombre,
+                        aPaterno,
+                        aMaterno || null,
+                        email,
+                        hashedPassword,
+                        puesto,
+                        estado || 'activo',
+                        imagen || null,
+                        currentDate,
+                        currentDate,
+                        telefono || null
+                    ], (err, result) => {
+                        if (err) {
+                            logger.error('Error al crear empleado:', err);
+                            return res.status(500).json({ success: false, message: 'Error al guardar el empleado.' });
+                        }
 
-                    db.query(
-                        insertSql,
-                        [nombre, aPaterno, aMaterno || null, email, hashedPassword, puesto, estado || 'activo', imagen || null, currentDate, currentDate, telefono || null],
-                        (err, result) => {
+                        const newEmployeeId = result.insertId;
+                        const selectSql = `
+                            SELECT id, nombre, aPaterno, aMaterno, email, puesto, estado, imagen, fecha_creacion, ultima_actualizacion
+                            FROM empleados WHERE id = ?;
+                        `;
+                        db.query(selectSql, [newEmployeeId], (err, result) => {
                             if (err) {
-                                logger.error('Error al crear empleado:', err);
-                                return res.status(500).json({
-                                    success: false,
-                                    message: 'Error al guardar el empleado.'
-                                });
+                                logger.error('Error al obtener el empleado creado:', err);
+                                return res.status(201).json({ success: true, message: 'Empleado creado, pero no se pudo recuperar.' });
                             }
 
-                            // Obtener el empleado recién creado (sin la contraseña)
-                            const newEmployeeId = result.insertId;
-                            const selectSql = `
-                SELECT id, nombre, aPaterno, aMaterno, email, puesto, estado, imagen, fecha_creacion, ultima_actualizacion
-                FROM empleados
-                WHERE id = ?;
-              `;
-
-                            db.query(selectSql, [newEmployeeId], (err, result) => {
-                                if (err) {
-                                    logger.error('Error al obtener el empleado creado:', err);
-                                    return res.status(201).json({
-                                        success: true,
-                                        message: 'Empleado creado exitosamente.',
-                                        id: newEmployeeId
-                                    });
-                                }
-
-                                res.status(201).json(result[0]);
-                            });
-                        }
-                    );
+                            res.status(201).json(result[0]);
+                        });
+                    });
                 } catch (error) {
                     logger.error('Error al hashear contraseña:', error);
-                    return res.status(500).json({
-                        success: false,
-                        message: 'Error al procesar la contraseña.'
-                    });
+                    return res.status(500).json({ success: false, message: 'Error al procesar la contraseña.' });
                 }
             }
         });
     } catch (error) {
         logger.error('Error en la ruta POST /:', error);
-        res.status(500).json({
-            success: false,
-            message: 'Error en el servidor.'
-        });
+        res.status(500).json({ success: false, message: 'Error en el servidor.' });
     }
 });
 
