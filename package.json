@@ -33,6 +33,7 @@
     "nodemailer": "^6.9.15",
     "rate-limiter-flexible": "^5.0.4",
     "sharp": "^0.33.5",
+    "twilio": "^5.5.1",
     "useragent": "^2.3.0",
     "winston": "^3.17.0",
     "winston-daily-rotate-file": "^5.0.0",

@@ -72,6 +72,9 @@ const resenyas = require("./routes/admin/resenyasUsers");
 const paciente =require("./routes/pacientes/pacientes")
 const p_perfil = require("./routes/pacientes/perfil")
 
+const whatsappRouter = require('./routes/whatsapp');
+
+
 // Asignar rutas
 app.use("/api", Registrer);
 app.use("/api/users", userRoutes);
@@ -94,6 +97,7 @@ app.use("/api/Graficas",Graficas);
 app.use("/api/Finanzas",Finanzas);
 app.use("/api/resenya" ,resenyas);
 
+
 //empleados
 app.use("/api/expediente", expediente);
 app.use("/api/empleados", Empleados);
@@ -102,6 +106,10 @@ app.use("/api/horarios", Horarios);
 //pacientes
 app.use("/api/pacientes", paciente);
 app.use("/api/profile", p_perfil);
+
+
+app.use('/api/whatsapp', whatsappRouter);
+
 
 app.listen(3001, () => {
   console.log("Servidor corriendo en puerto 3001");
