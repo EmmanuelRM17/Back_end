@@ -31,8 +31,16 @@ router.post('/msj', [
 
     try {
         // Generar fecha y hora formateada para México (Hidalgo)
-        const fechaHora = new Date().toLocaleString('es-MX', {
-            timeZone: 'America/Mexico_City',
+        // Crear objeto Date con la hora actual
+        const ahora = new Date();
+
+        // Ajustar manualmente para la zona horaria de México (UTC-6)
+        // Ya que hay un problema con toLocaleString y la zona horaria
+        const offsetMexico = -6 * 60; // UTC-6 en minutos
+        const fechaMexico = new Date(ahora.getTime() - (ahora.getTimezoneOffset() + offsetMexico) * 60000);
+
+        // Formatear la fecha con el método Intl.DateTimeFormat para asegurar formato correcto
+        const formateador = new Intl.DateTimeFormat('es-MX', {
             year: 'numeric',
             month: 'long',
             day: 'numeric',
@@ -41,6 +49,8 @@ router.post('/msj', [
             second: '2-digit',
             hour12: true
         });
+
+        const fechaHora = formateador.format(fechaMexico);
 
         // Guardar en la base de datos
         const sql = 'INSERT INTO contactanos (nombre, email, telefono, mensaje, fecha_creacion) VALUES (?, ?, ?, ?, NOW())';
@@ -121,5 +131,4 @@ router.post('/msj', [
         res.status(500).json({ error: 'Error en el servidor' });
     }
 });
-
 module.exports = router;
