@@ -30,12 +30,8 @@ router.post('/msj', [
     const { nombre, email, telefono, mensaje } = req.body;
 
     try {
-        // Generar fecha y hora formateada para México (Hidalgo)
-        // Crear objeto Date con la hora actual
-        const ahora = new Date();
 
-        // Ajustar manualmente para la zona horaria de México (UTC-6)
-        // Ya que hay un problema con toLocaleString y la zona horaria
+        const ahora = new Date();
         const offsetMexico = -6 * 60; // UTC-6 en minutos
         const fechaMexico = new Date(ahora.getTime() - (ahora.getTimezoneOffset() + offsetMexico) * 60000);
 
