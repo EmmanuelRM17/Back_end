@@ -39,38 +39,49 @@ router.post('/msj', [
                 return res.status(500).json({ error: 'Error al guardar en la base de datos' });
             }
 
-            // 2️⃣ Configurar el correo
+            // Configurar el correo con diseño profesional
             const mailOptions = {
                 from: '"Odontología Carol" <sistema@odontologiacarol.com>',
                 to: 'emma041117@gmail.com',
-                subject: `📩 Nuevo Mensaje de Contacto - ${nombre}`,
+                subject: `Nuevo Mensaje de Contacto - ${nombre}`,
                 html: `
-                    <div style="font-family: Arial, sans-serif; background-color: #f4f4f4; padding: 20px;">
-                        <div style="max-width: 600px; background-color: #ffffff; padding: 20px; margin: auto; border-radius: 8px; box-shadow: 0px 0px 10px rgba(0, 0, 0, 0.1);">
-                            <h2 style="color: #1976d2; text-align: center;">📩 Nuevo Mensaje de Contacto</h2>
-                            <p style="font-size: 16px; text-align: center; color: #555;">Has recibido un nuevo mensaje a través del formulario de contacto.</p>
-            
-                            <hr style="border: 1px solid #ddd; margin: 20px 0;">
-            
-                            <h3 style="color: #333;">👤 Información del Usuario</h3>
-                            <p><strong>📝 Nombre:</strong> ${nombre}</p>
-                            <p><strong>📧 Email:</strong> <a href="mailto:${email}" style="color: #1976d2;">${email}</a></p>
-                            <p><strong>📞 Teléfono:</strong> <a href="tel:${telefono}" style="color: #1976d2;">${telefono}</a></p>
-            
-                            <hr style="border: 1px solid #ddd; margin: 20px 0;">
-            
-                            <h3 style="color: #333;">✉️ Mensaje:</h3>
-                            <p style="font-size: 16px; background-color: #f9f9f9; padding: 15px; border-radius: 5px; border-left: 5px solid #1976d2;">
-                                ${mensaje}
-                            </p>
-            
-                            <hr style="border: 1px solid #ddd; margin: 20px 0;">
-            
-                            <footer style="text-align: center; color: #888; font-size: 14px;">
-                                <p>📍 <strong>Odontología Carol</strong> - Cuidando de tu salud bucal</p>
-                                <p>📩 <a href="mailto:sistema@odontologiacarol.com" style="color: #1976d2;">Responder a este mensaje</a></p>
-                                <p style="font-size: 12px;">Este es un correo automático, por favor no responder directamente.</p>
-                            </footer>
+                    <div style="font-family: 'Roboto', Arial, sans-serif; background-color: #f8f9fa; padding: 20px; margin: 0;">
+                        <div style="max-width: 600px; background-color: #ffffff; padding: 30px; margin: auto; border-radius: 6px; box-shadow: 0px 2px 8px rgba(0, 0, 0, 0.08);">
+                            <div style="text-align: center; margin-bottom: 25px; border-bottom: 1px solid #e0e0e0; padding-bottom: 20px;">
+                                <h2 style="color: #1976d2; font-weight: 500; margin: 0 0 10px 0;">Nuevo Mensaje de Contacto</h2>
+                                <p style="font-size: 15px; color: #546e7a; margin: 0;">Ha recibido un nuevo mensaje a través del formulario de contacto</p>
+                            </div>
+                            
+                            <div style="margin-bottom: 25px;">
+                                <h3 style="color: #37474f; font-weight: 500; font-size: 16px; margin: 0 0 15px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0;">Información del Remitente</h3>
+                                <table style="width: 100%; border-collapse: collapse; font-size: 14px;">
+                                    <tr>
+                                        <td style="padding: 8px 5px; color: #616161; width: 90px;">Nombre:</td>
+                                        <td style="padding: 8px 5px; color: #263238; font-weight: 500;">${nombre}</td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 5px; color: #616161;">Email:</td>
+                                        <td style="padding: 8px 5px;"><a href="mailto:${email}" style="color: #1976d2; text-decoration: none;">${email}</a></td>
+                                    </tr>
+                                    <tr>
+                                        <td style="padding: 8px 5px; color: #616161;">Teléfono:</td>
+                                        <td style="padding: 8px 5px;"><a href="tel:${telefono}" style="color: #1976d2; text-decoration: none;">${telefono}</a></td>
+                                    </tr>
+                                </table>
+                            </div>
+                            
+                            <div style="margin-bottom: 25px;">
+                                <h3 style="color: #37474f; font-weight: 500; font-size: 16px; margin: 0 0 15px; padding-bottom: 8px; border-bottom: 1px solid #f0f0f0;">Mensaje</h3>
+                                <div style="font-size: 14px; background-color: #f5f7f9; padding: 16px; border-radius: 4px; border-left: 3px solid #1976d2; color: #37474f; line-height: 1.5;">
+                                    ${mensaje}
+                                </div>
+                            </div>
+                            
+                            <div style="margin-top: 30px; padding-top: 20px; border-top: 1px solid #e0e0e0; text-align: center; color: #78909c; font-size: 13px;">
+                                <p style="margin: 0 0 8px;"><strong>Odontología Carol</strong> - Cuidando de tu salud bucal</p>
+                                <p style="margin: 0 0 8px;"><a href="mailto:sistema@odontologiacarol.com" style="color: #1976d2; text-decoration: none;">Responder a este mensaje</a></p>
+                                <p style="font-size: 12px; color: #90a4ae; margin: 8px 0 0;">Este es un correo automático generado por el sistema.</p>
+                            </div>
                         </div>
                     </div>
                 `,
