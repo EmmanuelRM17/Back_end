@@ -17,12 +17,12 @@ const rateLimiter = new RateLimiterMemory({
 
 // Configuración de nodemailer
 const transporter = nodemailer.createTransport({
-    host: 'smtp.hostinger.com', 
-    port: 465, 
-    secure: true, 
+    host: 'smtp.hostinger.com',
+    port: 465,
+    secure: true,
     auth: {
-        user: 'sistema@odontologiacarol.com', 
-        pass: 'sP8+?;Vs:', 
+        user: 'sistema@odontologiacarol.com',
+        pass: 'sP8+?;Vs:',
     },
 });
 
@@ -71,11 +71,11 @@ router.post('/register', async (req, res) => {
         const lugar = xss(req.body.lugar);
         const telefono = xss(req.body.telefono);
         const email = xss(req.body.email);
-        
+
         // Procesar alergias y condiciones médicas por separado
         const alergias = JSON.stringify(req.body.alergias || []);
         const condicionesMedicas = JSON.stringify(req.body.condicionesMedicas || []);
-        
+
         const password = xss(req.body.password);
         const tipoTutor = xss(req.body.tipoTutor);
         const nombreTutor = xss(req.body.nombreTutor);
@@ -127,8 +127,8 @@ router.post('/register', async (req, res) => {
                         const hashedPassword = await bcrypt.hash(password, 10);
 
                         db.query(updateSql, [
-                            nombre, aPaterno, aMaterno, fechaNacimiento, genero, 
-                            lugar, telefono, alergias, condicionesMedicas, 
+                            nombre, aPaterno, aMaterno, fechaNacimiento, genero,
+                            lugar, telefono, alergias, condicionesMedicas,
                             tipoTutor, nombreTutor, hashedPassword, email
                         ], (err, result) => {
                             if (err) {
@@ -152,8 +152,8 @@ router.post('/register', async (req, res) => {
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)
                     `;
                     db.query(insertSql, [
-                        nombre, aPaterno, aMaterno, fechaNacimiento, genero, 
-                        lugar, telefono, email, alergias, condicionesMedicas, 
+                        nombre, aPaterno, aMaterno, fechaNacimiento, genero,
+                        lugar, telefono, email, alergias, condicionesMedicas,
                         tipoTutor, nombreTutor, hashedPassword
                     ], (err, result) => {
                         if (err) {
@@ -219,22 +219,34 @@ router.post('/recuperacion', async (req, res) => {
                     to: email,
                     subject: 'Recuperación de Contraseña - Odontología Carol',
                     html: `
-                        <div style="font-family: Arial, sans-serif; color: #333;">
-                            <div style="text-align: center; padding: 20px;">
-                                <h1 style="color: #1976d2;">Odontología Carol</h1>
-                                <p>¡Hola!</p>
-                                <p>Hemos recibido una solicitud para restablecer tu contraseña en <b>Odontología Carol</b>.</p>
-                                <p>Si no realizaste esta solicitud, puedes ignorar este correo. De lo contrario, utiliza el siguiente código para restablecer tu contraseña:</p>
-                                <div style="padding: 10px; background-color: #f0f0f0; border-radius: 5px; display: inline-block; margin: 20px 0;">
-                                    <span style="font-size: 24px; font-weight: bold; color: #1976d2;">${token}</span>
+                        <div style="font-family: 'Roboto', Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; background-color: #fafafa;">
+                            <div style="background-color: #1976d2; padding: 20px; text-align: center; border-radius: 4px 4px 0 0;">
+                                <h1 style="color: white; margin: 0; font-weight: 500; font-size: 22px;">Odontología Carol</h1>
+                            </div>
+                            <div style="padding: 30px 40px; background-color: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-radius: 0 0 4px 4px;">
+                                <p style="font-size: 16px; margin: 0 0 20px;">¡Hola!</p>
+                                <p style="font-size: 16px; margin: 0 0 15px; line-height: 1.5;">Hemos recibido una solicitud para restablecer tu contraseña en <b>Odontología Carol</b>.</p>
+                                <p style="font-size: 16px; margin: 0 0 20px; line-height: 1.5;">Si no realizaste esta solicitud, puedes ignorar este correo. De lo contrario, utiliza el siguiente código para restablecer tu contraseña:</p>
+                                
+                                <div style="text-align: center;">
+                                    <div style="padding: 15px 25px; background-color: #e3f2fd; border-radius: 8px; display: inline-block; margin: 25px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                        <span style="font-size: 28px; font-weight: 500; color: #1976d2; letter-spacing: 2px;">${token}</span>
+                                    </div>
                                 </div>
-                                <p style="color: #d32f2f; font-weight: bold; font-size: 18px;">El token debe ser copiado tal y como está, respetando los numeros y mayusculas.</p>
-                                <p><b>Nota:</b> Este código caduca en 15 minutos.</p>
-                                <hr style="margin: 20px 0;">
-                                <footer>
-                                    <p>Odontología Carol - Cuidando de tu salud bucal</p>
-                                    <p>Este es un correo generado automáticamente, por favor no respondas a este mensaje.</p>
-                                </footer>
+                                
+                                <div style="margin: 25px 0; padding: 15px; background-color: #fff8e1; border-left: 4px solid #d32f2f; border-radius: 4px;">
+                                    <p style="color: #d32f2f; font-weight: 500; font-size: 14px; margin: 0; line-height: 1.4;">
+                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d32f2f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                                        Importante: El token debe ser copiado tal y como está, respetando los números y mayúsculas.
+                                    </p>
+                                </div>
+                                
+                                <p style="font-size: 14px; color: #616161; margin: 20px 0; padding: 10px; background-color: #f5f5f5; border-radius: 4px;"><b>Nota:</b> Este código caduca en 15 minutos por seguridad.</p>
+                            </div>
+                            
+                            <div style="text-align: center; padding: 20px; color: #757575; font-size: 13px; border-top: 1px solid #eaeaea;">
+                                <p style="margin: 0 0 5px;">Odontología Carol - Cuidando de tu salud bucal</p>
+                                <p style="margin: 0; color: #9e9e9e;">Este es un correo generado automáticamente, por favor no respondas a este mensaje.</p>
                             </div>
                         </div>
                     `,
@@ -388,22 +400,35 @@ router.post('/send-verification-email', (req, res) => {
                 to: email,
                 subject: 'Verificación de Correo - Odontología Carol',
                 html: `
-                <div style="font-family: Arial, sans-serif; color: #333;">
-                    <div style="text-align: center; padding: 20px;">
-                        <h1 style="color: #1976d2;">Odontología Carol</h1>
-                        <p>¡Hola!</p>
-                        <p>Gracias por registrarte en <b>Odontología Carol</b>. Para completar tu registro, por favor verifica tu correo electrónico utilizando el siguiente código:</p>
-                        <div style="padding: 10px; background-color: #f0f0f0; border-radius: 5px; display: inline-block; margin: 20px 0;">
-                            <span style="font-size: 24px; font-weight: bold; color: #1976d2;">${verificationToken}</span>
+                <div style="font-family: 'Roboto', Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; background-color: #fafafa;">
+                    <div style="background-color: #1976d2; padding: 20px; text-align: center; border-radius: 4px 4px 0 0;">
+                        <h1 style="color: white; margin: 0; font-weight: 500; font-size: 22px;">Odontología Carol</h1>
+                    </div>
+                    <div style="padding: 30px 40px; background-color: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-radius: 0 0 4px 4px;">
+                        <p style="font-size: 16px; margin: 0 0 20px;">¡Hola!</p>
+                        <p style="font-size: 16px; margin: 0 0 15px; line-height: 1.5;">Gracias por registrarte en <b>Odontología Carol</b>. Para completar tu registro, por favor verifica tu correo electrónico utilizando el siguiente código:</p>
+                        
+                        <div style="text-align: center;">
+                            <div style="padding: 15px 25px; background-color: #e3f2fd; border-radius: 8px; display: inline-block; margin: 25px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                <span style="font-size: 28px; font-weight: 500; color: #1976d2; letter-spacing: 2px;">${verificationToken}</span>
+                            </div>
                         </div>
-                        <p>Ingresa este código en la página de verificación de tu cuenta.</p>
-                        <p style="color: #d32f2f; font-weight: bold; font-size: 18px;">El token debe ser copiado tal y como está, respetando los numeros y mayusculas.</p>
-                        <p><b>Nota:</b> Este código caduca en 15 minutos.</p>
-                        <hr style="margin: 20px 0;">
-                        <footer>
-                            <p>Odontología Carol - Cuidando de tu salud bucal</p>
-                            <p>Este es un correo generado automáticamente, por favor no respondas a este mensaje.</p>
-                        </footer>
+                        
+                        <p style="font-size: 15px; margin: 0 0 20px; text-align: center; color: #555;">Ingresa este código en la página de verificación de tu cuenta</p>
+                        
+                        <div style="margin: 25px 0; padding: 15px; background-color: #e8f5e9; border-left: 4px solid #2e7d32; border-radius: 4px;">
+                            <p style="color: #2e7d32; font-weight: 500; font-size: 14px; margin: 0; line-height: 1.4;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2e7d32" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                                Importante: El token debe ser copiado tal y como está, respetando los números y mayúsculas.
+                            </p>
+                        </div>
+                        
+                        <p style="font-size: 14px; color: #616161; margin: 20px 0; padding: 10px; background-color: #f5f5f5; border-radius: 4px;"><b>Nota:</b> Este código caduca en 15 minutos por seguridad.</p>
+                    </div>
+                    
+                    <div style="text-align: center; padding: 20px; color: #757575; font-size: 13px; border-top: 1px solid #eaeaea;">
+                        <p style="margin: 0 0 5px;">Odontología Carol - Cuidando de tu salud bucal</p>
+                        <p style="margin: 0; color: #9e9e9e;">Este es un correo generado automáticamente, por favor no respondas a este mensaje.</p>
                     </div>
                 </div>
                 `,
@@ -537,24 +562,41 @@ function handleVerificationCode(userType, email, res) {
             to: email,
             subject: 'Código de Verificación - Odontología Carol',
             html: `
-            <div style="font-family: Arial, sans-serif; color: #333;">
-                <div style="text-align: center; padding: 20px; border: 1px solid #e0e0e0; border-radius: 10px; background-color: #f9f9f9;">
-                    <h1 style="color: #1976d2; font-size: 24px; margin-bottom: 10px;">Odontología Carol</h1>
-                    <p style="font-size: 16px; margin: 0;">¡Hola!</p>
-                    <p style="font-size: 16px; margin: 10px 0 20px;">Gracias por confiar en <b>Odontología Carol</b>. Para continuar, ingresa el siguiente código de verificación en la página correspondiente:</p>
-                    <div style="display: inline-block; background-color: #e3f2fd; border-radius: 8px; padding: 15px 25px; margin: 20px 0;">
-                        <span style="font-size: 28px; font-weight: bold; color: #1976d2;">${verificationCode}</span>
+                <div style="font-family: 'Roboto', Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; background-color: #fafafa;">
+                    <div style="background-color: #1976d2; padding: 20px; text-align: center; border-radius: 4px 4px 0 0;">
+                        <h1 style="color: white; margin: 0; font-weight: 500; font-size: 22px;">Odontología Carol</h1>
                     </div>
-                    <p style="font-size: 14px; color: #616161; margin: 20px 0;">Este código es válido por 10 minutos. Por favor, no lo compartas con nadie.</p>
-                    <p style="font-size: 14px; color: #d32f2f; font-weight: bold;">Copia el código exactamente como está, respetando mayúsculas y minúsculas.</p>
-                    <hr style="border: none; border-top: 1px solid #e0e0e0; margin: 20px 0;">
-                    <footer style="font-size: 12px; color: #9e9e9e;">
-                        <p>Odontología Carol - Cuidando de tu salud bucal</p>
-                        <p>Este es un correo generado automáticamente, por favor no respondas a este mensaje.</p>
-                    </footer>
+                    <div style="padding: 30px 40px; background-color: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-radius: 0 0 4px 4px;">
+                        <p style="font-size: 16px; margin: 0 0 20px;">¡Hola!</p>
+                        <p style="font-size: 16px; margin: 0 0 15px; line-height: 1.5;">Gracias por confiar en <b>Odontología Carol</b>. Para continuar, ingresa el siguiente código de verificación en la página correspondiente:</p>
+                        
+                        <div style="text-align: center;">
+                            <div style="padding: 15px 25px; background-color: #e3f2fd; border-radius: 8px; display: inline-block; margin: 25px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                <span style="font-size: 28px; font-weight: 500; color: #1976d2; letter-spacing: 2px;">${verificationCode}</span>
+                            </div>
+                        </div>
+                        
+                        <div style="margin: 25px 0; padding: 15px; background-color: #f3e5f5; border-left: 4px solid #7b1fa2; border-radius: 4px;">
+                            <p style="color: #7b1fa2; font-weight: 500; font-size: 14px; margin: 0; line-height: 1.4;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#7b1fa2" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"></path></svg>
+                                Por seguridad: Este código es válido por 10 minutos. No lo compartas con nadie.
+                            </p>
+                        </div>
+                        
+                        <div style="margin: 15px 0; padding: 15px; background-color: #ffebee; border-left: 4px solid #d32f2f; border-radius: 4px;">
+                            <p style="color: #d32f2f; font-weight: 500; font-size: 14px; margin: 0; line-height: 1.4;">
+                                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d32f2f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                                Importante: Copia el código exactamente como está, respetando mayúsculas y minúsculas.
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div style="text-align: center; padding: 20px; color: #757575; font-size: 13px; border-top: 1px solid #eaeaea;">
+                        <p style="margin: 0 0 5px;">Odontología Carol - Cuidando de tu salud bucal</p>
+                        <p style="margin: 0; color: #9e9e9e;">Este es un correo generado automáticamente, por favor no respondas a este mensaje.</p>
+                    </div>
                 </div>
-            </div>
-            `,
+                `,
         };
         try {
             // Enviar el correo
