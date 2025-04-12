@@ -76,4 +76,32 @@ function getDefaultResponse() {
     return defaults[Math.floor(Math.random() * defaults.length)];
 }
 
+router.get("/precio", async (req, res) => {
+    const { nombre } = req.query;
+
+    if (!nombre) {
+        return res.status(400).json({ error: "Parámetro 'nombre' requerido" });
+    }
+
+    try {
+        const [servicios] = await db.promise().query(
+            'SELECT title, price FROM servicios WHERE title LIKE ?',
+            [`%${nombre}%`]
+        );
+
+        if (servicios.length === 0) {
+            return res.json({ error: "Servicio no encontrado" });
+        }
+
+        res.json({
+            servicio: servicios[0].title,
+            precio: servicios[0].price
+        });
+
+    } catch (error) {
+        console.error('Error al buscar servicio:', error);
+        res.status(500).json({ error: "Error interno del servidor" });
+    }
+});
+
 module.exports = router;
