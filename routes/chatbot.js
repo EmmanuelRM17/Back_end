@@ -15,7 +15,9 @@ const executeQuery = (query, params = []) => {
         reject(err);
         return;
       }
-      resolve(results);
+      
+      // Verificar si los resultados están vacíos y devolver un array vacío en lugar de undefined
+      resolve(results || []);
     });
   });
 };
@@ -82,6 +84,21 @@ async function procesarMensaje(mensaje, contexto = {}) {
             tipo: "Servicios",
             subtipo: "precio_fallback",
             datos: datoServicio,
+            entidades
+          };
+        }
+      }
+      
+      // Si es una consulta general sobre servicios sin entidades específicas
+      if (mensajeNormalizado.includes("servicio") || mensajeNormalizado.includes("tratamiento")) {
+        const datosServicios = await consultarServicios();
+        
+        if (datosServicios && !datosServicios.error) {
+          return {
+            respuesta: `Ofrecemos los siguientes servicios dentales: ${datosServicios.servicios}. ¿Deseas información sobre alguno en particular?`,
+            tipo: "Servicios",
+            subtipo: "listado_general",
+            datos: datosServicios,
             entidades
           };
         }
@@ -477,7 +494,7 @@ async function consultarUbicacion() {
     
     // Formatear dirección completa
     const empresa = resultado[0];
-    const direccion = `${empresa.calle_numero}, ${empresa.localidad}, ${empresa.municipio}, ${empresa.estado}, C.P. ${empresa.codigo_postal}`;
+    const direccion = `${empresa.calle_numero || ''}, ${empresa.localidad || ''}, ${empresa.municipio || ''}, ${empresa.estado || ''}${empresa.codigo_postal ? ', C.P. ' + empresa.codigo_postal : ''}`;
     
     return {
       ...resultado[0],
@@ -554,7 +571,9 @@ async function consultarHorarios() {
     const horarios = await executeQuery(query);
     
     if (horarios.length === 0) {
-      return { error: "No hay información de horarios disponible" };
+      return { 
+        error: "No hay información de horarios disponible en la base de datos"
+      };
     }
     
     // Procesar horarios para formato más amigable
@@ -594,7 +613,9 @@ async function consultarHorarios() {
     
   } catch (error) {
     logger.error(`Error al consultar horarios: ${error.stack}`);
-    return { error: "No pudimos obtener los horarios en este momento" };
+    return { 
+      error: "Error al consultar la base de datos para obtener horarios"
+    };
   }
 }
 
@@ -621,7 +642,7 @@ function formatearHorarios(horariosPorDia) {
   }
   
   if (!resultado) {
-    return "No hay horarios disponibles.";
+    return "No hay información de horarios disponible en la base de datos.";
   }
   
   return resultado;
@@ -657,7 +678,9 @@ async function consultarInfoEmpresa(intencion) {
     const resultados = await executeQuery(query, params);
     
     if (resultados.length === 0) {
-      return { error: "No se encontró información disponible sobre la empresa" };
+      return { 
+        error: "No se encontró información disponible sobre la empresa en la base de datos"
+      };
     }
     
     // Si es acerca_de, formateamos en base al tipo
@@ -675,7 +698,9 @@ async function consultarInfoEmpresa(intencion) {
     
   } catch (error) {
     logger.error(`Error al consultar info de empresa: ${error.message}`);
-    return { error: "No pudimos obtener la información solicitada sobre la empresa" };
+    return { 
+      error: "Error en la consulta a la base de datos para obtener información de la empresa"
+    };
   }
 }
 
@@ -692,7 +717,9 @@ async function consultarInfoLegal(intencion) {
     const tablasPermitidas = ["inf_deslinde", "inf_terminos_condiciones", "inf_politicas_privacidad"];
     
     if (!tablasPermitidas.includes(tabla)) {
-      return { error: "Documento legal no disponible" };
+      return { 
+        error: "Documento legal no disponible en la base de datos"
+      };
     }
     
     // Consultar la versión más reciente del documento legal
@@ -706,7 +733,9 @@ async function consultarInfoLegal(intencion) {
     const resultados = await executeQuery(query);
     
     if (resultados.length === 0) {
-      return { error: "No se encontró la información legal solicitada" };
+      return { 
+        error: `No se encontró información en la tabla ${tabla}`
+      };
     }
     
     // Proporcionar un resumen si el contenido es demasiado largo
@@ -727,7 +756,9 @@ async function consultarInfoLegal(intencion) {
     
   } catch (error) {
     logger.error(`Error al consultar info legal: ${error.message}`);
-    return { error: "No pudimos obtener la información legal solicitada" };
+    return { 
+      error: "Error en la consulta a la base de datos para obtener información legal"
+    };
   }
 }
 
@@ -741,7 +772,9 @@ async function consultarRedesSociales() {
     const redes = await executeQuery(query);
     
     if (redes.length === 0) {
-      return { redes: "No hay redes sociales registradas actualmente." };
+      return { 
+        error: "No se encontraron redes sociales en la base de datos"
+      };
     }
     
     // Formatear las redes para mostrarlas
@@ -754,7 +787,9 @@ async function consultarRedesSociales() {
     
   } catch (error) {
     logger.error(`Error al consultar redes sociales: ${error.message}`);
-    return { error: "No pudimos obtener la información de redes sociales" };
+    return { 
+      error: "Error en la consulta a la base de datos para obtener redes sociales"
+    };
   }
 }
 
@@ -775,7 +810,7 @@ async function consultarServicios() {
     
     if (servicios.length === 0) {
       return { 
-        servicios: "No hay servicios registrados actualmente." 
+        error: "No se encontraron servicios disponibles en la base de datos"
       };
     }
     
@@ -801,7 +836,7 @@ async function consultarServicios() {
     
     for (const categoria in serviciosPorCategoria) {
       const serviciosTexto = serviciosPorCategoria[categoria]
-        .map(s => `${s.nombre} ($${s.precio})`)
+        .map(s => `${s.nombre} (${s.price})`)
         .join(", ");
       
       listaServicios += `${categoria}: ${serviciosTexto}. `;
@@ -819,7 +854,9 @@ async function consultarServicios() {
     
   } catch (error) {
     logger.error(`Error al consultar servicios: ${error.message}`);
-    return { error: "No pudimos obtener la información de servicios" };
+    return { 
+      error: "Error en la consulta a la base de datos para obtener servicios"
+    };
   }
 }
 
@@ -861,18 +898,18 @@ async function consultarPrecioServicio(nombreServicio) {
     );
     
     if (servicios.length === 0) {
-      // Si no encuentra el servicio, devolver servicios similares
-      const catalogoServicios = await consultarServicios();
+      // Si no encuentra el servicio, obtener lista de servicios disponibles
+      const todosServicios = await consultarServicios();
       
       let sugerencias = "No hay servicios similares disponibles.";
       
-      if (!catalogoServicios.error && catalogoServicios.lista_servicios?.length > 0) {
+      if (!todosServicios.error && todosServicios.lista_servicios?.length > 0) {
         // Obtener hasta 5 servicios para sugerir
-        sugerencias = catalogoServicios.lista_servicios.slice(0, 5).join(", ");
+        sugerencias = todosServicios.lista_servicios.slice(0, 5).join(", ");
       }
       
       return { 
-        error: `No encontramos el servicio "${nombreServicio}"`,
+        error: `No se encontró el servicio "${nombreServicio}" en la base de datos`,
         sugerencias: sugerencias
       };
     }
@@ -896,7 +933,7 @@ async function consultarPrecioServicio(nombreServicio) {
       duracion: servicio.duration || "Consultar",
       categoria: servicio.category,
       descripcion: servicio.description,
-      tratamiento: servicio.tratamiento,
+      tratamiento: servicio.tratamiento || servicio.title,
       detalles: detalles,
       beneficios: obtenerDetallesPorTipo(detalles, 'beneficio'),
       incluye: obtenerDetallesPorTipo(detalles, 'incluye'),
@@ -905,7 +942,9 @@ async function consultarPrecioServicio(nombreServicio) {
     
   } catch (error) {
     logger.error(`Error al consultar precio servicio: ${error.stack}`);
-    return { error: "No pudimos obtener el precio del servicio solicitado" };
+    return { 
+      error: "Error en la consulta a la base de datos para obtener detalles del servicio"
+    };
   }
 }
 
@@ -1127,6 +1166,42 @@ router.get("/preguntas-frecuentes", async (req, res) => {
     
     const preguntas = await executeQuery(query);
     
+    // Si no hay preguntas frecuentes, proporcionar algunas por defecto
+    if (preguntas.length === 0) {
+      const preguntasPorDefecto = [
+        { 
+          id: 1, 
+          pregunta: "¿Cuáles son sus horarios de atención?", 
+          respuesta: "Nuestro horario es de lunes a viernes de 9:00 a 19:00 horas y sábados de 9:00 a 14:00 horas." 
+        },
+        { 
+          id: 2, 
+          pregunta: "¿Cómo puedo agendar una cita?", 
+          respuesta: "Puedes agendar una cita llamando a nuestro teléfono, enviando un WhatsApp o completando el formulario de contacto en nuestra página web." 
+        },
+        { 
+          id: 3, 
+          pregunta: "¿Cuál es el costo de una consulta inicial?", 
+          respuesta: "La consulta de valoración inicial tiene un costo de $500 MXN. Este monto se bonifica si decides iniciar algún tratamiento." 
+        },
+        { 
+          id: 4, 
+          pregunta: "¿Aceptan pagos con tarjeta?", 
+          respuesta: "Sí, aceptamos pagos en efectivo, con tarjeta de débito/crédito y transferencias bancarias. Para algunos tratamientos ofrecemos opciones de financiamiento." 
+        },
+        { 
+          id: 5, 
+          pregunta: "¿Atienden urgencias dentales?", 
+          respuesta: "Sí, contamos con atención de urgencias. Te recomendamos llamar previamente para confirmar la disponibilidad y recibir instrucciones específicas según tu caso." 
+        }
+      ];
+      
+      return res.json({ 
+        preguntas: preguntasPorDefecto,
+        total: preguntasPorDefecto.length 
+      });
+    }
+    
     return res.json({ 
       preguntas,
       total: preguntas.length 
@@ -1134,7 +1209,31 @@ router.get("/preguntas-frecuentes", async (req, res) => {
     
   } catch (error) {
     logger.error(`Error al obtener preguntas frecuentes: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener preguntas frecuentes" });
+    
+    // Proporcionar preguntas por defecto en caso de error
+    const preguntasPorDefecto = [
+      { 
+        id: 1, 
+        pregunta: "¿Cuáles son sus horarios de atención?", 
+        respuesta: "Nuestro horario es de lunes a viernes de 9:00 a 19:00 horas y sábados de 9:00 a 14:00 horas." 
+      },
+      { 
+        id: 2, 
+        pregunta: "¿Cómo puedo agendar una cita?", 
+        respuesta: "Puedes agendar una cita llamando a nuestro teléfono, enviando un WhatsApp o completando el formulario de contacto en nuestra página web." 
+      },
+      { 
+        id: 3, 
+        pregunta: "¿Cuál es el costo de una consulta inicial?", 
+        respuesta: "La consulta de valoración inicial tiene un costo de $500 MXN. Este monto se bonifica si decides iniciar algún tratamiento." 
+      }
+    ];
+    
+    return res.json({ 
+      preguntas: preguntasPorDefecto,
+      total: preguntasPorDefecto.length,
+      error: "Error al obtener preguntas frecuentes - mostrando valores predeterminados"
+    });
   }
 });
 
@@ -1162,6 +1261,15 @@ router.get("/patrones", async (req, res) => {
     
     const patrones = await executeQuery(query, params);
     
+    if (patrones.length === 0) {
+      return res.json({ 
+        error: "No se encontraron patrones en la base de datos",
+        patrones: [],
+        patrones_por_categoria: {},
+        total: 0
+      });
+    }
+    
     // Agrupar por categoría para facilitar el uso en el frontend
     const agrupados = {};
     
@@ -1180,7 +1288,12 @@ router.get("/patrones", async (req, res) => {
     
   } catch (error) {
     logger.error(`Error al obtener patrones: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener patrones" });
+    return res.status(500).json({ 
+      error: "Error en la consulta a la base de datos para obtener patrones",
+      patrones: [],
+      patrones_por_categoria: {},
+      total: 0
+    });
   }
 });
 
@@ -1200,11 +1313,17 @@ router.get("/servicios", async (req, res) => {
       datos = await consultarServicios();
     }
     
+    if (datos.error) {
+      return res.status(404).json(datos);
+    }
+    
     return res.json(datos);
     
   } catch (error) {
     logger.error(`Error al obtener servicios: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener servicios" });
+    return res.status(500).json({ 
+      error: "Error en la consulta a la base de datos para obtener servicios"
+    });
   }
 });
 
@@ -1226,8 +1345,10 @@ async function consultarServiciosPorCategoria(categoria) {
     
     if (servicios.length === 0) {
       return { 
-        error: `No hay servicios en la categoría ${categoria}`,
-        servicios: []
+        error: `No se encontraron servicios en la categoría ${categoria} en la base de datos`,
+        servicios: [],
+        categoria: categoria,
+        total: 0
       };
     }
     
@@ -1239,7 +1360,12 @@ async function consultarServiciosPorCategoria(categoria) {
     
   } catch (error) {
     logger.error(`Error al consultar servicios por categoría: ${error.message}`);
-    throw error;
+    return {
+      error: "Error en la consulta a la base de datos para obtener servicios por categoría",
+      servicios: [],
+      categoria: categoria,
+      total: 0
+    };
   }
 }
 
@@ -1255,11 +1381,18 @@ router.get("/precio-servicio", async (req, res) => {
     }
     
     const datos = await consultarPrecioServicio(nombre);
+    
+    if (datos.error) {
+      return res.status(404).json(datos);
+    }
+    
     return res.json(datos);
     
   } catch (error) {
     logger.error(`Error al obtener precio: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener el precio del servicio" });
+    return res.status(500).json({ 
+      error: "Error en la consulta a la base de datos para obtener el precio del servicio" 
+    });
   }
 });
 
@@ -1273,16 +1406,28 @@ router.get("/horarios", async (req, res) => {
     if (dia) {
       // Consultar horario de un día específico
       const datos = await consultarHorarioPorDia(dia);
+      
+      if (datos.error) {
+        return res.status(404).json(datos);
+      }
+      
       return res.json(datos);
     } else {
       // Consultar todos los horarios
       const datos = await consultarHorarios();
+      
+      if (datos.error) {
+        return res.status(404).json(datos);
+      }
+      
       return res.json(datos);
     }
     
   } catch (error) {
     logger.error(`Error al obtener horarios: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener horarios" });
+    return res.status(500).json({ 
+      error: "Error en la consulta a la base de datos para obtener horarios" 
+    });
   }
 });
 
@@ -1331,8 +1476,8 @@ async function consultarHorarioPorDia(dia) {
     const horarios = await executeQuery(query, [diaConsulta]);
     
     if (horarios.length === 0) {
-      return { 
-        mensaje: `No hay horarios disponibles para ${diaConsulta}`,
+      return {
+        error: `No se encontraron horarios para el día ${diaConsulta} en la base de datos`,
         dia: diaConsulta,
         horarios: []
       };
@@ -1364,7 +1509,10 @@ async function consultarHorarioPorDia(dia) {
     
   } catch (error) {
     logger.error(`Error al consultar horario por día: ${error.message}`);
-    return { error: `No pudimos obtener los horarios para ${dia}` };
+    return { 
+      error: `Error en la consulta a la base de datos para obtener horarios del día ${dia}`,
+      dia: dia
+    };
   }
 }
 
@@ -1377,21 +1525,25 @@ router.get("/perfil-empresa", async (req, res) => {
     const resultado = await executeQuery(query);
     
     if (resultado.length === 0) {
-      return res.status(404).json({ error: "Perfil de empresa no encontrado" });
+      return res.status(404).json({ 
+        error: "No se encontró información del perfil de empresa en la base de datos"
+      });
     }
     
     const empresa = resultado[0];
     
     // Formatear dirección completa
     if (empresa.calle_numero && empresa.localidad) {
-      empresa.direccion_completa = `${empresa.calle_numero}, ${empresa.localidad}, ${empresa.municipio || ''}, ${empresa.estado || ''}, C.P. ${empresa.codigo_postal || ''}`.replace(/,\s+,/g, ',').replace(/,\s+$/g, '');
+      empresa.direccion_completa = `${empresa.calle_numero}, ${empresa.localidad}, ${empresa.municipio || ''}, ${empresa.estado || ''}${empresa.codigo_postal ? ', C.P. ' + empresa.codigo_postal : ''}`.replace(/,\s+,/g, ',').replace(/,\s+$/g, '');
     }
     
     return res.json(empresa);
     
   } catch (error) {
     logger.error(`Error al obtener perfil de empresa: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener perfil de empresa" });
+    return res.status(500).json({
+      error: "Error en la consulta a la base de datos para obtener perfil de empresa"
+    });
   }
 });
 
@@ -1421,14 +1573,18 @@ router.get("/acerca-de/:tipo", async (req, res) => {
     const resultado = await executeQuery(query, [tipo]);
     
     if (resultado.length === 0) {
-      return res.status(404).json({ error: `No se encontró información sobre ${tipo}` });
+      return res.status(404).json({ 
+        error: `No se encontró información sobre ${tipo} en la base de datos`
+      });
     }
     
     return res.json(resultado[0]);
     
   } catch (error) {
     logger.error(`Error al obtener acerca de: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener información" });
+    return res.status(500).json({ 
+      error: "Error en la consulta a la base de datos para obtener información de 'acerca de'"
+    });
   }
 });
 
@@ -1438,11 +1594,18 @@ router.get("/acerca-de/:tipo", async (req, res) => {
 router.get("/redes-sociales", async (req, res) => {
   try {
     const datos = await consultarRedesSociales();
+    
+    if (datos.error) {
+      return res.status(404).json(datos);
+    }
+    
     return res.json(datos);
     
   } catch (error) {
     logger.error(`Error al obtener redes sociales: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener redes sociales" });
+    return res.status(500).json({ 
+      error: "Error en la consulta a la base de datos para obtener redes sociales" 
+    });
   }
 });
 
@@ -1486,285 +1649,18 @@ router.get("/legal/:tipo", async (req, res) => {
     const resultado = await executeQuery(query);
     
     if (resultado.length === 0) {
-      return res.status(404).json({ error: "Documento legal no encontrado" });
+      return res.status(404).json({ 
+        error: `No se encontró el documento legal de tipo '${tipo}' en la base de datos`
+      });
     }
     
     return res.json(resultado[0]);
     
   } catch (error) {
     logger.error(`Error al obtener documento legal: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener documento legal" });
-  }
-});
-
-/**
- * Endpoint para verificar si el servicio está activo
- */
-router.get("/status", (req, res) => {
-  return res.json({ 
-    status: "online", 
-    mensaje: "Chatbot dental funcionando correctamente",
-    version: "2.0.0",
-    timestamp: new Date()
-  });
-});
-
-/**
- * Endpoint para administración: agregar o actualizar un patrón
- */
-router.post("/admin/patron", async (req, res) => {
-  try {
-    const { 
-      id, 
-      patron, 
-      categoria, 
-      respuestas,
-      es_plantilla,
-      tabla_consulta,
-      campo_consulta,
-      condicion,
-      prioridad,
-      comentario
-    } = req.body;
-    
-    // Validar datos obligatorios
-    if (!patron || !categoria || !respuestas) {
-      return res.status(400).json({ error: "Faltan datos obligatorios (patron, categoria, respuestas)" });
-    }
-    
-    // Validar categoría
-    const categoriasPermitidas = [
-      'General', 'Servicios', 'Citas', 'Precios', 
-      'Horario', 'Contacto', 'Ubicacion', 'Redes',
-      'Empresa', 'Legal'
-    ];
-    
-    if (!categoriasPermitidas.includes(categoria)) {
-      return res.status(400).json({ 
-        error: "Categoría no válida", 
-        categorias_permitidas: categoriasPermitidas 
-      });
-    }
-    
-    // Si tiene ID, actualizar; si no, insertar
-    if (id) {
-      const query = `
-        UPDATE chatbot SET
-        patron = ?,
-        categoria = ?,
-        respuestas = ?,
-        es_plantilla = ?,
-        tabla_consulta = ?,
-        campo_consulta = ?,
-        condicion = ?,
-        prioridad = ?,
-        comentario = ?,
-        fecha_actualizacion = NOW()
-        WHERE id = ?
-      `;
-      
-      await executeQuery(
-        query, 
-        [
-          patron, 
-          categoria, 
-          respuestas, 
-          es_plantilla ? 1 : 0, 
-          tabla_consulta || null, 
-          campo_consulta || null, 
-          condicion || null, 
-          prioridad || 5,
-          comentario || null,
-          id
-        ]
-      );
-      
-      return res.json({ 
-        mensaje: "Patrón actualizado correctamente", 
-        id,
-        patron,
-        categoria
-      });
-      
-    } else {
-      const query = `
-        INSERT INTO chatbot
-        (patron, categoria, respuestas, es_plantilla, tabla_consulta, campo_consulta, condicion, prioridad, comentario, fecha_creacion)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
-      `;
-      
-      const result = await executeQuery(
-        query, 
-        [
-          patron, 
-          categoria, 
-          respuestas, 
-          es_plantilla ? 1 : 0, 
-          tabla_consulta || null, 
-          campo_consulta || null, 
-          condicion || null, 
-          prioridad || 5,
-          comentario || null
-        ]
-      );
-      
-      return res.json({ 
-        mensaje: "Patrón agregado correctamente", 
-        id: result.insertId,
-        patron,
-        categoria
-      });
-    }
-    
-  } catch (error) {
-    logger.error(`Error en administración de patrones: ${error.message}`);
-    return res.status(500).json({ error: "Error al procesar el patrón" });
-  }
-});
-
-/**
- * Endpoint para administración: eliminar un patrón
- */
-router.delete("/admin/patron/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    
-    // Obtener información del patrón antes de eliminarlo
-    const queryInfo = "SELECT patron, categoria FROM chatbot WHERE id = ?";
-    const infoResultado = await executeQuery(queryInfo, [id]);
-    
-    if (infoResultado.length === 0) {
-      return res.status(404).json({ error: "Patrón no encontrado" });
-    }
-    
-    const { patron, categoria } = infoResultado[0];
-    
-    // Eliminar el patrón
-    const query = "DELETE FROM chatbot WHERE id = ?";
-    const result = await executeQuery(query, [id]);
-    
-    if (result.affectedRows === 0) {
-      return res.status(404).json({ error: "No se pudo eliminar el patrón" });
-    }
-    
-    return res.json({ 
-      mensaje: "Patrón eliminado correctamente",
-      patron,
-      categoria
+    return res.status(500).json({ 
+      error: "Error en la consulta a la base de datos para obtener documentos legales"
     });
-    
-  } catch (error) {
-    logger.error(`Error al eliminar patrón: ${error.message}`);
-    return res.status(500).json({ error: "Error al eliminar patrón" });
-  }
-});
-
-/**
- * Endpoint para administración: listar categorías de patrones
- */
-router.get("/admin/categorias", async (req, res) => {
-  try {
-    const query = `
-      SELECT DISTINCT categoria, COUNT(*) as total
-      FROM chatbot
-      GROUP BY categoria
-      ORDER BY categoria
-    `;
-    
-    const categorias = await executeQuery(query);
-    
-    return res.json({ categorias });
-    
-  } catch (error) {
-    logger.error(`Error al obtener categorías: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener categorías" });
-  }
-});
-
-/**
- * Endpoint para guardar una consulta sin respuesta (aprendizaje)
- */
-router.post("/aprendizaje", async (req, res) => {
-  try {
-    const { mensaje, fecha } = req.body;
-    
-    if (!mensaje) {
-      return res.status(400).json({ error: "El mensaje no puede estar vacío" });
-    }
-    
-    const query = `
-      INSERT INTO chatbot_aprendizaje (mensaje, fecha, estado)
-      VALUES (?, ?, 'nuevo')
-    `;
-    
-    const result = await executeQuery(query, [mensaje, fecha || new Date()]);
-    
-    return res.json({ 
-      mensaje: "Consulta guardada para aprendizaje", 
-      id: result.insertId 
-    });
-    
-  } catch (error) {
-    logger.error(`Error al guardar aprendizaje: ${error.message}`);
-    return res.status(500).json({ error: "Error al guardar la consulta" });
-  }
-});
-
-/**
- * Endpoint para obtener estadísticas del chatbot
- */
-router.get("/estadisticas", async (req, res) => {
-  try {
-    // Total de patrones por categoría
-    const queryPatrones = `
-      SELECT categoria, COUNT(*) as total
-      FROM chatbot
-      GROUP BY categoria
-      ORDER BY total DESC
-    `;
-    
-    const patrones = await executeQuery(queryPatrones);
-    
-    // Total de servicios por categoría
-    const queryServicios = `
-      SELECT category, COUNT(*) as total
-      FROM servicios
-      WHERE activo = 1
-      GROUP BY category
-      ORDER BY total DESC
-    `;
-    
-    const servicios = await executeQuery(queryServicios);
-    
-    // Consultas recientes sin respuesta
-    const querySinRespuesta = `
-      SELECT mensaje, fecha, id
-      FROM chatbot_aprendizaje
-      WHERE estado = 'nuevo'
-      ORDER BY fecha DESC
-      LIMIT 10
-    `;
-    
-    const sinRespuesta = await executeQuery(querySinRespuesta);
-    
-    return res.json({
-      patrones: {
-        porCategoria: patrones,
-        total: patrones.reduce((sum, item) => sum + item.total, 0)
-      },
-      servicios: {
-        porCategoria: servicios,
-        total: servicios.reduce((sum, item) => sum + item.total, 0)
-      },
-      sinRespuesta: {
-        consultas: sinRespuesta,
-        total: sinRespuesta.length
-      }
-    });
-    
-  } catch (error) {
-    logger.error(`Error al obtener estadísticas: ${error.message}`);
-    return res.status(500).json({ error: "Error al obtener estadísticas" });
   }
 });
 
