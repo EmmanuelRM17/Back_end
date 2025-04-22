@@ -11,12 +11,7 @@ const executeQuery = (query, params = []) => {
   return new Promise((resolve, reject) => {
     db.query(query, params, (err, results) => {
       if (err) {
-        logger.error(
-          `Error en consulta SQL: ${err.message}, Query: ${query.substring(
-            0,
-            100
-          )}...`
-        );
+        logger.error(`Error en consulta SQL: ${err.message}, Query: ${query.substring(0, 100)}...`);
         reject(err);
         return;
       }
@@ -32,31 +27,27 @@ const executeQuery = (query, params = []) => {
 router.post("/mensaje", async (req, res) => {
   try {
     const { mensaje, contexto } = req.body;
-
+    
     // Validación básica
     if (!mensaje || mensaje.trim() === "") {
-      return res.status(400).json({
+      return res.status(400).json({ 
         error: "El mensaje no puede estar vacío",
-        status: "error",
+        status: "error"
       });
     }
-
+    
     // Procesamos el mensaje y obtenemos respuesta
     const respuesta = await procesarMensaje(mensaje, contexto);
-    logger.info(
-      `Mensaje procesado: "${mensaje.substring(0, 50)}..." - Tipo: ${
-        respuesta.tipo
-      }`
-    );
-
+    logger.info(`Mensaje procesado: "${mensaje.substring(0, 50)}..." - Tipo: ${respuesta.tipo}`);
+    
     return res.json(respuesta);
+    
   } catch (error) {
     logger.error(`Error en /chatbot/mensaje: ${error.message}`);
-    return res.status(500).json({
+    return res.status(500).json({ 
       error: "Error al procesar el mensaje",
-      mensaje:
-        "Lo siento, tuve un problema al procesar tu consulta. ¿Podrías intentarlo de nuevo?",
-      status: "error",
+      mensaje: "Lo siento, tuve un problema al procesar tu consulta. ¿Podrías intentarlo de nuevo?",
+      status: "error" 
     });
   }
 });
@@ -68,63 +59,50 @@ router.post("/mensaje", async (req, res) => {
  * @returns {object} - Respuesta estructurada para el usuario
  */
 async function procesarMensaje(mensaje, contexto = {}) {
-    try {
-      // Normalizar el mensaje
-      const mensajeNormalizado = normalizarTexto(mensaje);
-      
-      // CAMBIO CRUCIAL: Primero buscar si hay un servicio específico mencionado
-      const servicios = await extraerServicios(mensajeNormalizado);
-      
-      if (servicios.length > 0) {
-        // Si se menciona un servicio específico, priorizar esta consulta
-        const datosServicio = await consultarPrecioServicio(servicios[0]);
+  try {
+    // Normalizar el mensaje (minúsculas, quitar caracteres especiales, etc.)
+    const mensajeNormalizado = normalizarTexto(mensaje);
+    
+    // 1. Extraer entidades/servicios específicos del mensaje
+    const entidades = extraerEntidades(mensajeNormalizado);
+    
+    // 2. Buscar intenciones que coincidan con el mensaje
+    const intencion = await buscarIntencion(mensajeNormalizado);
+    
+    // Si no encontramos ninguna intención, devolvemos respuesta por defecto
+    if (!intencion) {
+      // Intento de respuesta basada en entidades encontradas
+      if (entidades.servicios.length > 0) {
+        const servicio = entidades.servicios[0];
+        const datoServicio = await consultarPrecioServicio(servicio);
         
-        if (datosServicio && !datosServicio.error) {
-          // Construir una respuesta detallada sobre el servicio
-          const respuestaDetallada = construirRespuestaServicio(datosServicio);
-          
+        if (datoServicio && !datoServicio.error) {
           return {
-            respuesta: respuestaDetallada,
+            respuesta: `No estoy seguro exactamente qué quieres saber sobre ${servicio}, pero te puedo decir que su precio es $${datoServicio.precio} MXN. ¿Necesitas más información sobre este tratamiento?`,
             tipo: "Servicios",
-            subtipo: "servicio_especifico",
-            datos: datosServicio
+            subtipo: "precio_fallback",
+            datos: datoServicio,
+            entidades
           };
         }
       }
       
-      // Si no hay servicio específico, continuar con el proceso normal
-      // [Resto del código procesarMensaje actual]
-    } catch (error) {
-      logger.error(`Error al procesar mensaje: ${error.stack}`);
-      throw error;
+      return {
+        respuesta: "Lo siento, no entendí tu consulta. ¿Podrías ser más específico o preguntar de otra manera? Puedo ayudarte con información sobre nuestros servicios, precios, horarios o formas de contacto.",
+        tipo: "default",
+        datos: null,
+        entidades
+      };
     }
+    
+    // 3. Generar respuesta según la intención, considerando las entidades encontradas
+    return await generarRespuesta(intencion, mensajeNormalizado, entidades, contexto);
+    
+  } catch (error) {
+    logger.error(`Error al procesar mensaje: ${error.stack}`);
+    throw error;
   }
-  
-  // Función para construir respuesta detallada sobre un servicio
-  function construirRespuestaServicio(datosServicio) {
-    let respuesta = `**${datosServicio.servicio || datosServicio.nombre}**\n`;
-    respuesta += `Precio: $${datosServicio.precio} MXN\n`;
-    
-    if (datosServicio.duracion) {
-      respuesta += `Duración aproximada: ${datosServicio.duracion}\n`;
-    }
-    
-    if (datosServicio.descripcion) {
-      respuesta += `\n${datosServicio.descripcion}\n`;
-    }
-    
-    if (datosServicio.beneficios) {
-      respuesta += `\nBeneficios: ${datosServicio.beneficios}\n`;
-    }
-    
-    if (datosServicio.incluye) {
-      respuesta += `\nIncluye: ${datosServicio.incluye}\n`;
-    }
-    
-    respuesta += "\n¿Deseas agendar una cita para este servicio o tienes alguna otra pregunta?";
-    
-    return respuesta;
-  }
+}
 
 /**
  * Normaliza el texto del mensaje para facilitar el procesamiento
@@ -133,13 +111,12 @@ async function procesarMensaje(mensaje, contexto = {}) {
  */
 function normalizarTexto(texto) {
   if (!texto) return "";
-
-  return texto
-    .toLowerCase()
+  
+  return texto.toLowerCase()
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "") // Eliminar acentos
-    .replace(/[^\w\s]/gi, " ") // Reemplazar caracteres especiales por espacios
-    .replace(/\s+/g, " ") // Eliminar espacios múltiples
+    .replace(/[^\w\s]/gi, " ")       // Reemplazar caracteres especiales por espacios
+    .replace(/\s+/g, " ")            // Eliminar espacios múltiples
     .trim();
 }
 
@@ -155,74 +132,28 @@ function extraerEntidades(mensaje) {
     precios: false,
     horarios: false,
     ubicacion: false,
-    contacto: false,
+    contacto: false
   };
-
+  
   // Palabras clave para detectar intención sobre precios
-  const palabrasPrecio = [
-    "precio",
-    "costo",
-    "valor",
-    "cuanto",
-    "cuánto",
-    "cuesta",
-    "cobran",
-    "tarifa",
-    "pagar",
-  ];
-  entidades.precios = palabrasPrecio.some((palabra) =>
-    mensaje.includes(palabra)
-  );
-
+  const palabrasPrecio = ['precio', 'costo', 'valor', 'cuanto', 'cuánto', 'cuesta', 'cobran', 'tarifa', 'pagar'];
+  entidades.precios = palabrasPrecio.some(palabra => mensaje.includes(palabra));
+  
   // Palabras clave para detectar intención sobre horarios
-  const palabrasHorario = [
-    "horario",
-    "hora",
-    "abierto",
-    "disponible",
-    "atienden",
-    "cuando",
-    "cuándo",
-    "dias",
-    "días",
-  ];
-  entidades.horarios = palabrasHorario.some((palabra) =>
-    mensaje.includes(palabra)
-  );
-
+  const palabrasHorario = ['horario', 'hora', 'abierto', 'disponible', 'atienden', 'cuando', 'cuándo', 'dias', 'días'];
+  entidades.horarios = palabrasHorario.some(palabra => mensaje.includes(palabra));
+  
   // Palabras clave para detectar intención sobre ubicación
-  const palabrasUbicacion = [
-    "donde",
-    "dónde",
-    "ubicacion",
-    "ubicación",
-    "dirección",
-    "direccion",
-    "llegar",
-    "encuentran",
-  ];
-  entidades.ubicacion = palabrasUbicacion.some((palabra) =>
-    mensaje.includes(palabra)
-  );
-
+  const palabrasUbicacion = ['donde', 'dónde', 'ubicacion', 'ubicación', 'dirección', 'direccion', 'llegar', 'encuentran'];
+  entidades.ubicacion = palabrasUbicacion.some(palabra => mensaje.includes(palabra));
+  
   // Palabras clave para detectar intención sobre contacto
-  const palabrasContacto = [
-    "contacto",
-    "telefono",
-    "teléfono",
-    "llamar",
-    "email",
-    "correo",
-    "whatsapp",
-    "contactar",
-  ];
-  entidades.contacto = palabrasContacto.some((palabra) =>
-    mensaje.includes(palabra)
-  );
-
+  const palabrasContacto = ['contacto', 'telefono', 'teléfono', 'llamar', 'email', 'correo', 'whatsapp', 'contactar'];
+  entidades.contacto = palabrasContacto.some(palabra => mensaje.includes(palabra));
+  
   // Buscar servicios dentales mencionados
   entidades.servicios = extraerServicios(mensaje);
-
+  
   return entidades;
 }
 
@@ -232,42 +163,41 @@ function extraerEntidades(mensaje) {
  * @returns {array} - Array con los servicios encontrados
  */
 function extraerServicios(mensaje) {
-    // Obtener lista completa de servicios desde la base de datos (si es posible cachear)
-    return obtenerServiciosCache().then(serviciosDisponibles => {
-      const serviciosEncontrados = [];
-      
-      // Primera pasada: buscar coincidencias exactas (con y sin acentos)
-      for (const servicio of serviciosDisponibles) {
-        // Normalizar nombre de servicio (sin acentos, minúsculas)
-        const servicioNormalizado = servicio.toLowerCase()
-          .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        
-        const mensajeNormalizado = mensaje.toLowerCase()
-          .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
-        
-        // Verificar coincidencia exacta
-        if (mensajeNormalizado.includes(servicioNormalizado)) {
-          return [servicio]; // Retorna inmediatamente si hay coincidencia exacta
+  // Definición de servicios y sus sinónimos para una detección más robusta
+  const catalogoServicios = [
+    {nombre: "limpieza dental", alternativas: ["limpieza", "profilaxis", "higiene"]},
+    {nombre: "blanqueamiento", alternativas: ["blanquear", "aclarar dientes", "dientes blancos"]},
+    {nombre: "ortodoncia", alternativas: ["brackets", "frenos", "alineadores", "alinear", "enderezar"]},
+    {nombre: "implante", alternativas: ["implantes", "implante dental", "implantacion"]},
+    {nombre: "endodoncia", alternativas: ["matar nervio", "conducto", "nervio"]},
+    {nombre: "extracción", alternativas: ["sacar", "quitar", "remover", "muela", "extraccion"]},
+    {nombre: "consulta", alternativas: ["revision", "chequeo", "evaluacion", "diagnostico", "diagnóstico"]},
+    {nombre: "carilla", alternativas: ["carillas", "funda", "fundas"]},
+    {nombre: "corona", alternativas: ["coronas", "funda", "fundas"]},
+    {nombre: "empaste", alternativas: ["empastar", "tapar", "caries", "resina", "amalgama", "calza"]},
+    {nombre: "prótesis", alternativas: ["protesis", "dentadura", "puente"]},
+    {nombre: "invisalign", alternativas: ["alineador", "alineadores", "invisible"]},
+    {nombre: "muelas del juicio", alternativas: ["cordal", "cordales", "juicio"]}
+  ];
+  
+  const serviciosEncontrados = [];
+  
+  // Buscar cada servicio y sus alternativas en el mensaje
+  catalogoServicios.forEach(servicio => {
+    if (mensaje.includes(servicio.nombre)) {
+      serviciosEncontrados.push(servicio.nombre);
+    } else {
+      for (const alternativa of servicio.alternativas) {
+        if (mensaje.includes(alternativa)) {
+          serviciosEncontrados.push(servicio.nombre);
+          break;
         }
       }
-      
-      // Si no hay coincidencias exactas, continuar con el método actual
-      // [Resto del código de extraerServicios actual]
-      
-      return serviciosEncontrados;
-    });
-  }
-  
-  // Función para obtener y cachear servicios
-  async function obtenerServiciosCache() {
-    if (!global.serviciosCache || Date.now() - global.serviciosCacheTime > 3600000) {
-      const query = "SELECT title FROM servicios";
-      const servicios = await executeQuery(query);
-      global.serviciosCache = servicios.map(s => s.title);
-      global.serviciosCacheTime = Date.now();
     }
-    return global.serviciosCache;
-  }
+  });
+  
+  return serviciosEncontrados;
+}
 
 /**
  * Busca una intención que coincida con el mensaje del usuario
@@ -284,16 +214,14 @@ async function buscarIntencion(mensaje) {
       ORDER BY prioridad DESC
       LIMIT 1
     `;
-
+    
     const intencionesExactas = await executeQuery(queryExacta, [mensaje]);
-
+    
     if (intencionesExactas.length > 0) {
-      logger.debug(
-        `Intención encontrada (coincidencia exacta): ${intencionesExactas[0].patron}`
-      );
+      logger.debug(`Intención encontrada (coincidencia exacta): ${intencionesExactas[0].patron}`);
       return intencionesExactas[0];
     }
-
+    
     // 2. Si no hay coincidencia exacta, buscar patrones que estén contenidos
     const queryContenido = `
       SELECT *, 
@@ -303,22 +231,14 @@ async function buscarIntencion(mensaje) {
       ORDER BY prioridad DESC, relevancia DESC, LENGTH(patron) DESC
       LIMIT 1
     `;
-
-    const intencionesContenido = await executeQuery(queryContenido, [
-      mensaje,
-      mensaje,
-    ]);
-
-    if (
-      intencionesContenido.length > 0 &&
-      intencionesContenido[0].relevancia > 0.3
-    ) {
-      logger.debug(
-        `Intención encontrada (patrón contenido): ${intencionesContenido[0].patron}`
-      );
+    
+    const intencionesContenido = await executeQuery(queryContenido, [mensaje, mensaje]);
+    
+    if (intencionesContenido.length > 0 && intencionesContenido[0].relevancia > 0.3) {
+      logger.debug(`Intención encontrada (patrón contenido): ${intencionesContenido[0].patron}`);
       return intencionesContenido[0];
     }
-
+    
     // 3. Buscar si el mensaje contiene algún patrón
     const queryInversa = `
       SELECT *,
@@ -328,19 +248,14 @@ async function buscarIntencion(mensaje) {
       ORDER BY prioridad DESC, LENGTH(patron) DESC
       LIMIT 1
     `;
-
-    const intencionesInversas = await executeQuery(queryInversa, [
-      mensaje,
-      mensaje,
-    ]);
-
+    
+    const intencionesInversas = await executeQuery(queryInversa, [mensaje, mensaje]);
+    
     if (intencionesInversas.length > 0) {
-      logger.debug(
-        `Intención encontrada (mensaje contiene patrón): ${intencionesInversas[0].patron}`
-      );
+      logger.debug(`Intención encontrada (mensaje contiene patrón): ${intencionesInversas[0].patron}`);
       return intencionesInversas[0];
     }
-
+    
     // 4. Búsqueda por palabras clave individuales del patrón
     const queryPalabras = `
       SELECT c.*,
@@ -361,31 +276,18 @@ async function buscarIntencion(mensaje) {
       ORDER BY coincidencias DESC, c.prioridad DESC
       LIMIT 1
     `;
-
-    const intencionesPalabras = await executeQuery(queryPalabras, [
-      mensaje,
-      mensaje,
-      mensaje,
-    ]);
-
-    if (
-      intencionesPalabras.length > 0 &&
-      intencionesPalabras[0].coincidencias >= 2
-    ) {
-      logger.debug(
-        `Intención encontrada (coincidencia palabras): ${intencionesPalabras[0].patron}`
-      );
+    
+    const intencionesPalabras = await executeQuery(queryPalabras, [mensaje, mensaje, mensaje]);
+    
+    if (intencionesPalabras.length > 0 && intencionesPalabras[0].coincidencias >= 2) {
+      logger.debug(`Intención encontrada (coincidencia palabras): ${intencionesPalabras[0].patron}`);
       return intencionesPalabras[0];
     }
-
+    
     // Si llegamos aquí, no se encontró ninguna intención que coincida
-    logger.info(
-      `No se encontró intención para el mensaje: "${mensaje.substring(
-        0,
-        50
-      )}..."`
-    );
+    logger.info(`No se encontró intención para el mensaje: "${mensaje.substring(0, 50)}..."`);
     return null;
+    
   } catch (error) {
     logger.error(`Error al buscar intención: ${error.message}`);
     throw error;
@@ -404,49 +306,42 @@ async function generarRespuesta(intencion, mensaje, entidades, contexto = {}) {
   try {
     // 1. Verificar si la intención requiere una consulta a la base de datos
     let datosConsulta = null;
-
+    
     // Si hay servicios específicos mencionados, priorizarlos en la consulta
-    const hayServicioEspecifico =
-      entidades.servicios.length > 0 &&
-      (intencion.categoria === "Servicios" ||
-        intencion.categoria === "Precios");
-
+    const hayServicioEspecifico = entidades.servicios.length > 0 && 
+                                 (intencion.categoria === 'Servicios' || 
+                                  intencion.categoria === 'Precios');
+    
     if (hayServicioEspecifico) {
       const servicio = entidades.servicios[0];
       datosConsulta = await consultarPrecioServicio(servicio);
-
+      
       // Si no encontramos información específica, pero tenemos una intención general
-      if (datosConsulta?.error && intencion.categoria === "Servicios") {
+      if (datosConsulta?.error && intencion.categoria === 'Servicios') {
         datosConsulta = await consultarServicios();
       }
-    }
+    } 
     // Si no hay servicios específicos, pero hay una intención definida
     else if (intencion.tabla_consulta) {
-      datosConsulta = await realizarConsultaSegunCategoria(
-        intencion,
-        mensaje,
-        entidades
-      );
+      datosConsulta = await realizarConsultaSegunCategoria(intencion, mensaje, entidades);
     }
-
+    
     // 2. Obtener una respuesta aleatoria de las disponibles
     const respuesta = seleccionarRespuestaAleatoria(intencion.respuestas);
-
+    
     // 3. Si hay datos de consulta y la respuesta es una plantilla, reemplazar variables
     let respuestaFinal = respuesta;
-
+    
     if (datosConsulta) {
       if (intencion.es_plantilla) {
         // Verificar si todas las variables de la plantilla tienen datos
-        const variablesEnPlantilla = (
-          respuesta.match(/\{\{([^}]+)\}\}/g) || []
-        ).map((v) => v.replace(/\{\{|\}\}/g, ""));
-
+        const variablesEnPlantilla = (respuesta.match(/\{\{([^}]+)\}\}/g) || [])
+          .map(v => v.replace(/\{\{|\}\}/g, ''));
+        
         // Si faltan datos esenciales, podemos buscar una respuesta alternativa
-        const faltanDatosEsenciales = variablesEnPlantilla.some(
-          (v) => !datosConsulta[v] && !tieneValorPorDefecto(datosConsulta, v)
-        );
-
+        const faltanDatosEsenciales = variablesEnPlantilla.some(v => 
+          !datosConsulta[v] && !tieneValorPorDefecto(datosConsulta, v));
+        
         if (faltanDatosEsenciales && datosConsulta.error) {
           // Si hay error en los datos, usar mensaje de error
           respuestaFinal = `Lo siento, ${datosConsulta.error}`;
@@ -462,15 +357,16 @@ async function generarRespuesta(intencion, mensaje, entidades, contexto = {}) {
         respuestaFinal += ` (Nota: ${datosConsulta.error})`;
       }
     }
-
+    
     // 4. Devolver respuesta formateada
     return {
       respuesta: respuestaFinal,
       tipo: intencion.categoria,
-      subtipo: hayServicioEspecifico ? "servicio_especifico" : "general",
+      subtipo: hayServicioEspecifico ? 'servicio_especifico' : 'general',
       datos: datosConsulta,
-      entidades: entidades,
+      entidades: entidades
     };
+    
   } catch (error) {
     logger.error(`Error al generar respuesta: ${error.stack}`);
     throw error;
@@ -486,20 +382,20 @@ async function generarRespuesta(intencion, mensaje, entidades, contexto = {}) {
 function tieneValorPorDefecto(datos, variable) {
   // Mapeo de variables a posibles alternativas
   const alternativas = {
-    servicio: ["title", "nombre", "nombre_servicio"],
-    precio: ["price", "precio_servicio", "costo"],
-    duracion: ["duration", "tiempo", "minutos"],
-    horarios: ["horario", "horas_atencion"],
-    redes: ["redes_sociales", "redes_lista"],
-    direccion: ["calle_numero", "ubicacion", "domicilio"],
-    telefono: ["telefono_principal", "contacto", "celular"],
+    'servicio': ['title', 'nombre', 'nombre_servicio'],
+    'precio': ['price', 'precio_servicio', 'costo'],
+    'duracion': ['duration', 'tiempo', 'minutos'],
+    'horarios': ['horario', 'horas_atencion'],
+    'redes': ['redes_sociales', 'redes_lista'],
+    'direccion': ['calle_numero', 'ubicacion', 'domicilio'],
+    'telefono': ['telefono_principal', 'contacto', 'celular']
   };
-
+  
   // Verificar alternativas
   if (alternativas[variable]) {
-    return alternativas[variable].some((alt) => datos[alt] !== undefined);
+    return alternativas[variable].some(alt => datos[alt] !== undefined);
   }
-
+  
   return false;
 }
 
@@ -513,49 +409,48 @@ function tieneValorPorDefecto(datos, variable) {
 async function realizarConsultaSegunCategoria(intencion, mensaje, entidades) {
   try {
     switch (intencion.categoria) {
-      case "Horario":
+      case 'Horario':
         return await consultarHorarios();
-
-      case "Redes":
+      
+      case 'Redes':
         return await consultarRedesSociales();
-
-      case "Empresa":
+      
+      case 'Empresa':
         return await consultarInfoEmpresa(intencion);
-
-      case "Legal":
+      
+      case 'Legal':
         return await consultarInfoLegal(intencion);
-
-      case "Servicios":
+      
+      case 'Servicios':
         if (entidades.servicios.length > 0) {
           return await consultarPrecioServicio(entidades.servicios[0]);
         } else {
           return await consultarServicios();
         }
-
-      case "Precios":
+      
+      case 'Precios':
         // Extraer el nombre del servicio del mensaje
         if (entidades.servicios.length > 0) {
           return await consultarPrecioServicio(entidades.servicios[0]);
         } else {
           // Si no hay servicio específico pero preguntan por precios
-          return {
-            mensaje_generico:
-              "Contamos con diferentes tratamientos con precios variados. ¿Sobre qué tratamiento específico te gustaría conocer el precio?",
+          return { 
+            mensaje_generico: "Contamos con diferentes tratamientos con precios variados. ¿Sobre qué tratamiento específico te gustaría conocer el precio?"
           };
         }
-
-      case "Contacto":
+      
+      case 'Contacto':
         return await consultarContacto();
-
-      case "Ubicacion":
+      
+      case 'Ubicacion':
         return await consultarUbicacion();
-
+      
       default:
         // Consulta genérica para otras categorías
         if (intencion.campo_consulta && intencion.tabla_consulta) {
           return await consultaGenerica(
-            intencion.tabla_consulta,
-            intencion.campo_consulta,
+            intencion.tabla_consulta, 
+            intencion.campo_consulta, 
             intencion.condicion
           );
         }
@@ -575,19 +470,20 @@ async function consultarUbicacion() {
   try {
     const query = "SELECT * FROM inf_perfil_empresa LIMIT 1";
     const resultado = await executeQuery(query);
-
+    
     if (resultado.length === 0) {
       return { error: "No se encontró información de ubicación" };
     }
-
+    
     // Formatear dirección completa
     const empresa = resultado[0];
     const direccion = `${empresa.calle_numero}, ${empresa.localidad}, ${empresa.municipio}, ${empresa.estado}, C.P. ${empresa.codigo_postal}`;
-
+    
     return {
       ...resultado[0],
-      direccion_completa: direccion,
+      direccion_completa: direccion
     };
+    
   } catch (error) {
     logger.error(`Error al consultar ubicación: ${error.message}`);
     return { error: "No pudimos obtener la información de ubicación" };
@@ -601,17 +497,14 @@ async function consultarUbicacion() {
  */
 function seleccionarRespuestaAleatoria(respuestasStr) {
   if (!respuestasStr) return "Lo siento, no tengo una respuesta para eso.";
-
+  
   // Las respuestas están separadas por |||
-  const respuestas = respuestasStr
-    .split("|||")
-    .map((r) => r.trim())
-    .filter((r) => r);
-
+  const respuestas = respuestasStr.split('|||').map(r => r.trim()).filter(r => r);
+  
   if (respuestas.length === 0) {
     return "Lo siento, no tengo una respuesta para eso.";
   }
-
+  
   // Seleccionar una aleatoriamente
   const indice = Math.floor(Math.random() * respuestas.length);
   return respuestas[indice];
@@ -625,23 +518,22 @@ async function consultarContacto() {
   try {
     const query = "SELECT * FROM inf_perfil_empresa LIMIT 1";
     const resultado = await executeQuery(query);
-
+    
     if (resultado.length === 0) {
       return { error: "No se encontró información de contacto" };
     }
-
+    
     // Obtener también redes sociales para complementar
     const redes = await consultarRedesSociales();
-
+    
     return {
       ...resultado[0],
       redes: redes.redes || null,
-      redes_lista: redes.redes_lista || [],
+      redes_lista: redes.redes_lista || []
     };
+    
   } catch (error) {
-    logger.error(
-      `Error al consultar información de contacto: ${error.message}`
-    );
+    logger.error(`Error al consultar información de contacto: ${error.message}`);
     return { error: "No pudimos obtener la información de contacto" };
   }
 }
@@ -658,57 +550,48 @@ async function consultarHorarios() {
       LEFT JOIN empleados e ON h.empleado_id = e.id
       ORDER BY FIELD(h.dia_semana, 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'), h.hora_inicio
     `;
-
+    
     const horarios = await executeQuery(query);
-
+    
     if (horarios.length === 0) {
       return { error: "No hay información de horarios disponible" };
     }
-
+    
     // Procesar horarios para formato más amigable
     const horariosPorDia = {};
-    const diasOrdenados = [
-      "Lunes",
-      "Martes",
-      "Miércoles",
-      "Jueves",
-      "Viernes",
-      "Sábado",
-      "Domingo",
-    ];
-
+    const diasOrdenados = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    
     // Inicializar estructura
-    diasOrdenados.forEach((dia) => {
+    diasOrdenados.forEach(dia => {
       horariosPorDia[dia] = [];
     });
-
+    
     // Agrupar horarios por día
-    horarios.forEach((h) => {
+    horarios.forEach(h => {
       if (!horariosPorDia[h.dia_semana]) {
         horariosPorDia[h.dia_semana] = [];
       }
-
+      
       // Formatear hora para mostrar (quitar segundos)
-      const horaInicio = h.hora_inicio?.substring(0, 5) || "";
-      const horaFin = h.hora_fin?.substring(0, 5) || "";
-
+      const horaInicio = h.hora_inicio?.substring(0, 5) || '';
+      const horaFin = h.hora_fin?.substring(0, 5) || '';
+      
       horariosPorDia[h.dia_semana].push({
-        empleado: h.nombre_empleado || "General",
+        empleado: h.nombre_empleado || 'General',
         horario: `${horaInicio} - ${horaFin}`,
-        duracion: h.duracion || 0,
+        duracion: h.duracion || 0
       });
     });
-
+    
     // Generar texto de horarios formateado
     const formatoHorario = formatearHorarios(horariosPorDia);
-
+    
     return {
       horarios: formatoHorario,
       horarios_detalle: horariosPorDia,
-      dias_atencion: diasOrdenados
-        .filter((dia) => horariosPorDia[dia]?.length > 0)
-        .join(", "),
+      dias_atencion: diasOrdenados.filter(dia => horariosPorDia[dia]?.length > 0).join(', ')
     };
+    
   } catch (error) {
     logger.error(`Error al consultar horarios: ${error.stack}`);
     return { error: "No pudimos obtener los horarios en este momento" };
@@ -722,33 +605,25 @@ async function consultarHorarios() {
  */
 function formatearHorarios(horariosPorDia) {
   let resultado = "";
-  const diasOrdenados = [
-    "Lunes",
-    "Martes",
-    "Miércoles",
-    "Jueves",
-    "Viernes",
-    "Sábado",
-    "Domingo",
-  ];
-
+  const diasOrdenados = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+  
   for (const dia of diasOrdenados) {
     if (horariosPorDia[dia] && horariosPorDia[dia].length > 0) {
       resultado += `${dia}: `;
-
+      
       // Agrupar horarios para mostrar horarios únicos
-      const horarios = horariosPorDia[dia].map((h) => h.horario);
+      const horarios = horariosPorDia[dia].map(h => h.horario);
       const horariosUnicos = [...new Set(horarios)].sort();
-
+      
       resultado += horariosUnicos.join(", ");
       resultado += ". ";
     }
   }
-
+  
   if (!resultado) {
     return "No hay horarios disponibles.";
   }
-
+  
   return resultado;
 }
 
@@ -762,7 +637,7 @@ async function consultarInfoEmpresa(intencion) {
     // Consulta según el tipo específico
     let query;
     let params = [];
-
+    
     if (intencion.condicion) {
       // Si hay una condición específica (ej: tipo = 'Historia')
       query = `
@@ -778,32 +653,29 @@ async function consultarInfoEmpresa(intencion) {
         ORDER BY id_empresa LIMIT 1
       `;
     }
-
+    
     const resultados = await executeQuery(query, params);
-
+    
     if (resultados.length === 0) {
-      return {
-        error: "No se encontró información disponible sobre la empresa",
-      };
+      return { error: "No se encontró información disponible sobre la empresa" };
     }
-
+    
     // Si es acerca_de, formateamos en base al tipo
-    if (intencion.condicion && intencion.condicion.includes("tipo")) {
-      const tipoInfo = resultados[0].tipo || "Información";
+    if (intencion.condicion && intencion.condicion.includes('tipo')) {
+      const tipoInfo = resultados[0].tipo || 'Información';
       return {
         tipo: tipoInfo,
         descripcion: resultados[0].descripcion,
         contenido: resultados[0].descripcion, // Para compatibilidad con plantillas
-        fecha_actualizacion: resultados[0].fecha_actualizacion,
+        fecha_actualizacion: resultados[0].fecha_actualizacion
       };
     }
-
+    
     return resultados[0];
+    
   } catch (error) {
     logger.error(`Error al consultar info de empresa: ${error.message}`);
-    return {
-      error: "No pudimos obtener la información solicitada sobre la empresa",
-    };
+    return { error: "No pudimos obtener la información solicitada sobre la empresa" };
   }
 }
 
@@ -815,18 +687,14 @@ async function consultarInfoEmpresa(intencion) {
 async function consultarInfoLegal(intencion) {
   try {
     const tabla = intencion.tabla_consulta;
-
+    
     // Validar el nombre de la tabla para evitar SQL injection
-    const tablasPermitidas = [
-      "inf_deslinde",
-      "inf_terminos_condiciones",
-      "inf_politicas_privacidad",
-    ];
-
+    const tablasPermitidas = ["inf_deslinde", "inf_terminos_condiciones", "inf_politicas_privacidad"];
+    
     if (!tablasPermitidas.includes(tabla)) {
       return { error: "Documento legal no disponible" };
     }
-
+    
     // Consultar la versión más reciente del documento legal
     const query = `
       SELECT * FROM ${tabla}
@@ -834,29 +702,29 @@ async function consultarInfoLegal(intencion) {
       ORDER BY version DESC, fecha_actualizacion DESC
       LIMIT 1
     `;
-
+    
     const resultados = await executeQuery(query);
-
+    
     if (resultados.length === 0) {
       return { error: "No se encontró la información legal solicitada" };
     }
-
+    
     // Proporcionar un resumen si el contenido es demasiado largo
     const documento = resultados[0];
-
+    
     // Asignar el campo contenido para compatibilidad con plantillas
     if (documento.titulo && !documento.contenido) {
       documento.contenido = documento.titulo;
     }
-
+    
     if (documento.contenido && documento.contenido.length > 300) {
-      documento.contenido_resumido =
-        documento.contenido.substring(0, 297) + "...";
+      documento.contenido_resumido = documento.contenido.substring(0, 297) + "...";
     } else {
       documento.contenido_resumido = documento.contenido;
     }
-
+    
     return documento;
+    
   } catch (error) {
     logger.error(`Error al consultar info legal: ${error.message}`);
     return { error: "No pudimos obtener la información legal solicitada" };
@@ -869,23 +737,21 @@ async function consultarInfoLegal(intencion) {
  */
 async function consultarRedesSociales() {
   try {
-    const query =
-      "SELECT * FROM inf_redes_sociales WHERE activo = 1 ORDER BY nombre_red";
+    const query = "SELECT * FROM inf_redes_sociales WHERE activo = 1 ORDER BY nombre_red";
     const redes = await executeQuery(query);
-
+    
     if (redes.length === 0) {
       return { redes: "No hay redes sociales registradas actualmente." };
     }
-
+    
     // Formatear las redes para mostrarlas
-    const redesFormateadas = redes
-      .map((red) => `${red.nombre_red}: ${red.url}`)
-      .join(", ");
-
-    return {
+    const redesFormateadas = redes.map(red => `${red.nombre_red}: ${red.url}`).join(", ");
+    
+    return { 
       redes: redesFormateadas,
-      redes_lista: redes,
+      redes_lista: redes
     };
+    
   } catch (error) {
     logger.error(`Error al consultar redes sociales: ${error.message}`);
     return { error: "No pudimos obtener la información de redes sociales" };
@@ -898,63 +764,65 @@ async function consultarRedesSociales() {
  */
 async function consultarServicios() {
   try {
-    // Consulta modificada: se eliminó el filtro 'activo = 1' que causaba el problema
     const query = `
-        SELECT id, title, description, category, price, duration, image_url
-        FROM servicios
-        ORDER BY category, title
-      `;
-
+      SELECT id, title, description, category, price, duration, image_url
+      FROM servicios
+      WHERE activo = 1
+      ORDER BY category, title
+    `;
+    
     const servicios = await executeQuery(query);
-
+    
     if (servicios.length === 0) {
-      return {
-        servicios: "No hay servicios registrados actualmente.",
+      return { 
+        servicios: "No hay servicios registrados actualmente." 
       };
     }
-
+    
     // Agrupar servicios por categoría
     const serviciosPorCategoria = {};
-
-    servicios.forEach((s) => {
+    
+    servicios.forEach(s => {
       if (!serviciosPorCategoria[s.category]) {
         serviciosPorCategoria[s.category] = [];
       }
-
+      
       serviciosPorCategoria[s.category].push({
         id: s.id,
         nombre: s.title,
         precio: s.price,
         duracion: s.duration,
-        descripcion: s.description,
+        descripcion: s.description
       });
     });
-
+    
     // Formatear para mostrar
     let listaServicios = "";
-
+    
     for (const categoria in serviciosPorCategoria) {
       const serviciosTexto = serviciosPorCategoria[categoria]
-        .map((s) => `${s.nombre} ($${s.precio})`)
+        .map(s => `${s.nombre} ($${s.precio})`)
         .join(", ");
-
+      
       listaServicios += `${categoria}: ${serviciosTexto}. `;
     }
-
+    
     // Lista de todos los nombres de servicios (útil para sugerencias)
-    const todosServicios = servicios.map((s) => s.title);
-
-    return {
+    const todosServicios = servicios.map(s => s.title);
+    
+    return { 
       servicios: listaServicios,
       serviciosPorCategoria: serviciosPorCategoria,
       lista_servicios: todosServicios,
-      total_servicios: servicios.length,
+      total_servicios: servicios.length
     };
+    
   } catch (error) {
     logger.error(`Error al consultar servicios: ${error.message}`);
     return { error: "No pudimos obtener la información de servicios" };
   }
 }
+
 /**
  * Consulta el precio y detalles de un servicio específico
  * @param {string} nombreServicio - Nombre del servicio a consultar
@@ -965,7 +833,7 @@ async function consultarPrecioServicio(nombreServicio) {
     if (!nombreServicio) {
       return { error: "No se especificó ningún servicio" };
     }
-
+    
     // Consulta principal para encontrar el servicio
     const query = `
       SELECT s.id, s.title, s.description, s.price, s.duration, s.category, s.image_url,
@@ -980,45 +848,45 @@ async function consultarPrecioServicio(nombreServicio) {
                LENGTH(s.title) ASC
       LIMIT 1
     `;
-
+    
     // Varios patrones para mejorar la búsqueda
-    const servicios = await executeQuery(query, [
-      nombreServicio,
-      `%${nombreServicio}%`,
-      nombreServicio,
-      `%${nombreServicio}%`,
-    ]);
-
+    const servicios = await executeQuery(
+      query, 
+      [
+        nombreServicio, 
+        `%${nombreServicio}%`,
+        nombreServicio,
+        `%${nombreServicio}%`
+      ]
+    );
+    
     if (servicios.length === 0) {
       // Si no encuentra el servicio, devolver servicios similares
       const catalogoServicios = await consultarServicios();
-
+      
       let sugerencias = "No hay servicios similares disponibles.";
-
-      if (
-        !catalogoServicios.error &&
-        catalogoServicios.lista_servicios?.length > 0
-      ) {
+      
+      if (!catalogoServicios.error && catalogoServicios.lista_servicios?.length > 0) {
         // Obtener hasta 5 servicios para sugerir
         sugerencias = catalogoServicios.lista_servicios.slice(0, 5).join(", ");
       }
-
-      return {
+      
+      return { 
         error: `No encontramos el servicio "${nombreServicio}"`,
-        sugerencias: sugerencias,
+        sugerencias: sugerencias
       };
     }
-
+    
     const servicio = servicios[0];
-
+    
     // Consultar detalles adicionales
     const queryDetalles = `
       SELECT * FROM servicio_detalles
       WHERE servicio_id = ?
     `;
-
+    
     const detalles = await executeQuery(queryDetalles, [servicio.id]);
-
+    
     // Asignar campos para facilitar el uso con plantillas
     return {
       id: servicio.id,
@@ -1030,10 +898,11 @@ async function consultarPrecioServicio(nombreServicio) {
       descripcion: servicio.description,
       tratamiento: servicio.tratamiento,
       detalles: detalles,
-      beneficios: obtenerDetallesPorTipo(detalles, "beneficio"),
-      incluye: obtenerDetallesPorTipo(detalles, "incluye"),
-      precauciones: obtenerDetallesPorTipo(detalles, "precaucion"),
+      beneficios: obtenerDetallesPorTipo(detalles, 'beneficio'),
+      incluye: obtenerDetallesPorTipo(detalles, 'incluye'),
+      precauciones: obtenerDetallesPorTipo(detalles, 'precaucion')
     };
+    
   } catch (error) {
     logger.error(`Error al consultar precio servicio: ${error.stack}`);
     return { error: "No pudimos obtener el precio del servicio solicitado" };
@@ -1050,15 +919,15 @@ function obtenerDetallesPorTipo(detalles, tipo) {
   if (!detalles || !Array.isArray(detalles) || detalles.length === 0) {
     return "";
   }
-
+  
   const filtrados = detalles
-    .filter((d) => d.tipo === tipo)
-    .map((d) => d.descripcion);
-
+    .filter(d => d.tipo === tipo)
+    .map(d => d.descripcion);
+  
   if (filtrados.length === 0) {
     return "";
   }
-
+  
   return filtrados.join(". ");
 }
 
@@ -1073,52 +942,46 @@ async function consultaGenerica(tabla, campo, condicion) {
   try {
     // Lista de tablas permitidas para consulta
     const tablasPermitidas = [
-      "acerca_de",
-      "chatbot",
-      "horarios",
-      "inf_deslinde",
-      "inf_perfil_empresa",
-      "inf_politicas_privacidad",
-      "inf_redes_sociales",
-      "inf_terminos_condiciones",
-      "preguntas_frecuentes",
-      "servicios",
-      "servicio_detalles",
+      'acerca_de', 'chatbot', 'horarios', 'inf_deslinde', 
+      'inf_perfil_empresa', 'inf_politicas_privacidad', 
+      'inf_redes_sociales', 'inf_terminos_condiciones',
+      'preguntas_frecuentes', 'servicios', 'servicio_detalles'
     ];
-
+    
     // Validar el nombre de la tabla para evitar SQL injection
     if (!tablasPermitidas.includes(tabla)) {
       return { error: "Tabla no permitida" };
     }
-
+    
     // Validar el campo para evitar SQL injection
-    if (campo !== "*" && !/^[a-zA-Z0-9_,\s]+$/.test(campo)) {
+    if (campo !== '*' && !/^[a-zA-Z0-9_,\s]+$/.test(campo)) {
       return { error: "Campo no válido" };
     }
-
+    
     // Construir la consulta base
     let query = `SELECT ${campo} FROM ${tabla}`;
-
+    
     // Agregar condición si existe
     if (condicion) {
       // Validación básica de condiciones
       if (!/^[a-zA-Z0-9_\s=<>'\(\)]+$/.test(condicion)) {
         return { error: "Condición no válida" };
       }
-
+      
       query += ` WHERE ${condicion}`;
     }
-
+    
     // Limitar resultados por seguridad
     query += " LIMIT 10";
-
+    
     const resultados = await executeQuery(query);
-
+    
     if (resultados.length === 0) {
       return { error: "No se encontraron resultados" };
     }
-
+    
     return { resultados: resultados };
+    
   } catch (error) {
     logger.error(`Error en consulta genérica: ${error.message}`);
     return { error: "Error al realizar la consulta" };
@@ -1134,26 +997,25 @@ async function consultaGenerica(tabla, campo, condicion) {
 function reemplazarVariables(plantilla, datos) {
   // Si no hay datos, devolver la plantilla original
   if (!datos || !plantilla) return plantilla || "";
-
+  
   let resultado = plantilla;
-
+  
   // Extraer todas las variables de la plantilla
-  const variables = (plantilla.match(/\{\{([^}]+)\}\}/g) || []).map((v) =>
-    v.replace(/\{\{|\}\}/g, "")
-  );
-
+  const variables = (plantilla.match(/\{\{([^}]+)\}\}/g) || [])
+    .map(v => v.replace(/\{\{|\}\}/g, ''));
+  
   // Reemplazar cada variable encontrada
   for (const variable of variables) {
     let valor = null;
-
+    
     // Buscar el valor en los datos
     if (datos[variable] !== undefined) {
       valor = datos[variable];
-    }
+    } 
     // Buscar en las alternativas si no se encuentra directamente
     else {
       const alternativas = obtieneAlternativasVariable(variable);
-
+      
       for (const alt of alternativas) {
         if (datos[alt] !== undefined) {
           valor = datos[alt];
@@ -1161,40 +1023,36 @@ function reemplazarVariables(plantilla, datos) {
         }
       }
     }
-
+    
     // Si se encontró un valor, reemplazar en la plantilla
     if (valor !== null) {
-      const regex = new RegExp(`\\{\\{${variable}\\}\\}`, "g");
+      const regex = new RegExp(`\\{\\{${variable}\\}\\}`, 'g');
       resultado = resultado.replace(regex, valor);
     }
   }
-
+  
   // Verificar si quedaron variables sin reemplazar
   const variablesFaltantes = resultado.match(/\{\{([^}]+)\}\}/g);
-
+  
   if (variablesFaltantes) {
     // Reemplazar variables restantes con valores predeterminados o eliminarlas
     for (const variable of variablesFaltantes) {
-      const nombreVar = variable.replace(/\{\{|\}\}/g, "");
+      const nombreVar = variable.replace(/\{\{|\}\}/g, '');
       const valorPredeterminado = obtenerValorPredeterminado(nombreVar, datos);
-
-      const regex = new RegExp(`\\{\\{${nombreVar}\\}\\}`, "g");
+      
+      const regex = new RegExp(`\\{\\{${nombreVar}\\}\\}`, 'g');
       resultado = resultado.replace(regex, valorPredeterminado);
     }
   }
-
+  
   // Si hay un mensaje de error, agregarlo al final
   if (datos.error && !resultado.includes(datos.error)) {
-    if (
-      !resultado.endsWith(".") &&
-      !resultado.endsWith("?") &&
-      !resultado.endsWith("!")
-    ) {
-      resultado += ".";
+    if (!resultado.endsWith('.') && !resultado.endsWith('?') && !resultado.endsWith('!')) {
+      resultado += '.';
     }
     resultado += ` (${datos.error})`;
   }
-
+  
   return resultado;
 }
 
@@ -1206,18 +1064,18 @@ function reemplazarVariables(plantilla, datos) {
 function obtieneAlternativasVariable(variable) {
   // Mapeo de variables a posibles alternativas
   const alternativas = {
-    servicio: ["title", "nombre", "nombre_servicio"],
-    precio: ["price", "precio_servicio", "costo"],
-    duracion: ["duration", "tiempo", "minutos"],
-    horarios: ["horario", "horas_atencion"],
-    redes: ["redes_sociales", "redes_lista"],
-    direccion: ["calle_numero", "ubicacion", "domicilio", "direccion_completa"],
-    telefono: ["telefono_principal", "contacto", "celular"],
-    descripcion: ["description", "contenido", "detalle"],
-    categoria: ["category", "tipo"],
-    contenido: ["descripcion", "description", "texto"],
+    'servicio': ['title', 'nombre', 'nombre_servicio'],
+    'precio': ['price', 'precio_servicio', 'costo'],
+    'duracion': ['duration', 'tiempo', 'minutos'],
+    'horarios': ['horario', 'horas_atencion'],
+    'redes': ['redes_sociales', 'redes_lista'],
+    'direccion': ['calle_numero', 'ubicacion', 'domicilio', 'direccion_completa'],
+    'telefono': ['telefono_principal', 'contacto', 'celular'],
+    'descripcion': ['description', 'contenido', 'detalle'],
+    'categoria': ['category', 'tipo'],
+    'contenido': ['descripcion', 'description', 'texto']
   };
-
+  
   return alternativas[variable] || [];
 }
 
@@ -1229,27 +1087,27 @@ function obtieneAlternativasVariable(variable) {
  */
 function obtenerValorPredeterminado(variable, datos) {
   switch (variable) {
-    case "servicio":
-    case "nombre":
-    case "title":
+    case 'servicio':
+    case 'nombre':
+    case 'title':
       return "este servicio";
-
-    case "precio":
-    case "price":
+      
+    case 'precio':
+    case 'price':
       return "consultar precio en clínica";
-
-    case "duracion":
-    case "duration":
+      
+    case 'duracion':
+    case 'duration':
       return "variable según paciente";
-
-    case "horarios":
+      
+    case 'horarios':
       return "horario de atención regular";
-
-    case "descripcion":
-    case "description":
-    case "contenido":
+      
+    case 'descripcion':
+    case 'description':
+    case 'contenido':
       return "";
-
+      
     default:
       return "";
   }
@@ -1266,18 +1124,17 @@ router.get("/preguntas-frecuentes", async (req, res) => {
       ORDER BY fecha_creacion DESC
       LIMIT 15
     `;
-
+    
     const preguntas = await executeQuery(query);
-
-    return res.json({
+    
+    return res.json({ 
       preguntas,
-      total: preguntas.length,
+      total: preguntas.length 
     });
+    
   } catch (error) {
     logger.error(`Error al obtener preguntas frecuentes: ${error.message}`);
-    return res
-      .status(500)
-      .json({ error: "Error al obtener preguntas frecuentes" });
+    return res.status(500).json({ error: "Error al obtener preguntas frecuentes" });
   }
 });
 
@@ -1288,38 +1145,39 @@ router.get("/patrones", async (req, res) => {
   try {
     // Filtrar por categoría si se especifica
     const { categoria } = req.query;
-
+    
     let query = `
       SELECT id, patron, categoria, prioridad 
       FROM chatbot
     `;
-
+    
     const params = [];
-
+    
     if (categoria) {
       query += ` WHERE categoria = ?`;
       params.push(categoria);
     }
-
+    
     query += ` ORDER BY categoria, prioridad DESC`;
-
+    
     const patrones = await executeQuery(query, params);
-
+    
     // Agrupar por categoría para facilitar el uso en el frontend
     const agrupados = {};
-
-    patrones.forEach((p) => {
+    
+    patrones.forEach(p => {
       if (!agrupados[p.categoria]) {
         agrupados[p.categoria] = [];
       }
       agrupados[p.categoria].push(p);
     });
-
-    return res.json({
+    
+    return res.json({ 
       patrones,
       patrones_por_categoria: agrupados,
-      total: patrones.length,
+      total: patrones.length
     });
+    
   } catch (error) {
     logger.error(`Error al obtener patrones: ${error.message}`);
     return res.status(500).json({ error: "Error al obtener patrones" });
@@ -1333,7 +1191,7 @@ router.get("/servicios", async (req, res) => {
   try {
     const { categoria } = req.query;
     let datos;
-
+    
     if (categoria) {
       // Filtrar por categoría específica
       datos = await consultarServiciosPorCategoria(categoria);
@@ -1341,8 +1199,9 @@ router.get("/servicios", async (req, res) => {
       // Todos los servicios
       datos = await consultarServicios();
     }
-
+    
     return res.json(datos);
+    
   } catch (error) {
     logger.error(`Error al obtener servicios: ${error.message}`);
     return res.status(500).json({ error: "Error al obtener servicios" });
@@ -1362,25 +1221,24 @@ async function consultarServiciosPorCategoria(categoria) {
       WHERE category = ? AND activo = 1
       ORDER BY title
     `;
-
+    
     const servicios = await executeQuery(query, [categoria]);
-
+    
     if (servicios.length === 0) {
-      return {
+      return { 
         error: `No hay servicios en la categoría ${categoria}`,
-        servicios: [],
+        servicios: []
       };
     }
-
+    
     return {
       servicios: servicios,
       categoria: categoria,
-      total: servicios.length,
+      total: servicios.length
     };
+    
   } catch (error) {
-    logger.error(
-      `Error al consultar servicios por categoría: ${error.message}`
-    );
+    logger.error(`Error al consultar servicios por categoría: ${error.message}`);
     throw error;
   }
 }
@@ -1391,20 +1249,17 @@ async function consultarServiciosPorCategoria(categoria) {
 router.get("/precio-servicio", async (req, res) => {
   try {
     const { nombre } = req.query;
-
+    
     if (!nombre) {
-      return res
-        .status(400)
-        .json({ error: "Debe especificar el nombre del servicio" });
+      return res.status(400).json({ error: "Debe especificar el nombre del servicio" });
     }
-
+    
     const datos = await consultarPrecioServicio(nombre);
     return res.json(datos);
+    
   } catch (error) {
     logger.error(`Error al obtener precio: ${error.message}`);
-    return res
-      .status(500)
-      .json({ error: "Error al obtener el precio del servicio" });
+    return res.status(500).json({ error: "Error al obtener el precio del servicio" });
   }
 });
 
@@ -1414,7 +1269,7 @@ router.get("/precio-servicio", async (req, res) => {
 router.get("/horarios", async (req, res) => {
   try {
     const { dia } = req.query;
-
+    
     if (dia) {
       // Consultar horario de un día específico
       const datos = await consultarHorarioPorDia(dia);
@@ -1424,6 +1279,7 @@ router.get("/horarios", async (req, res) => {
       const datos = await consultarHorarios();
       return res.json(datos);
     }
+    
   } catch (error) {
     logger.error(`Error al obtener horarios: ${error.message}`);
     return res.status(500).json({ error: "Error al obtener horarios" });
@@ -1438,42 +1294,32 @@ router.get("/horarios", async (req, res) => {
 async function consultarHorarioPorDia(dia) {
   try {
     // Normalizar el día (primera letra mayúscula, resto minúsculas)
-    const diaNormalizado =
-      dia.charAt(0).toUpperCase() + dia.slice(1).toLowerCase();
-
+    const diaNormalizado = dia.charAt(0).toUpperCase() + dia.slice(1).toLowerCase();
+    
     // Mapeo de posibles variaciones
     const mapDias = {
-      lun: "Lunes",
-      mar: "Martes",
-      mie: "Miércoles",
-      jue: "Jueves",
-      vie: "Viernes",
-      sab: "Sábado",
-      dom: "Domingo",
+      'lun': 'Lunes',
+      'mar': 'Martes',
+      'mie': 'Miércoles',
+      'jue': 'Jueves',
+      'vie': 'Viernes',
+      'sab': 'Sábado',
+      'dom': 'Domingo'
     };
-
+    
     // Obtener el día completo si es una abreviatura
-    const diaConsulta =
-      mapDias[diaNormalizado.substring(0, 3)] || diaNormalizado;
-
+    const diaConsulta = mapDias[diaNormalizado.substring(0, 3)] || diaNormalizado;
+    
     // Validar que sea un día válido
-    const diasValidos = [
-      "Lunes",
-      "Martes",
-      "Miércoles",
-      "Jueves",
-      "Viernes",
-      "Sábado",
-      "Domingo",
-    ];
-
+    const diasValidos = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    
     if (!diasValidos.includes(diaConsulta)) {
-      return {
+      return { 
         error: "Día no válido. Debe ser uno de: " + diasValidos.join(", "),
-        dia: diaNormalizado,
+        dia: diaNormalizado
       };
     }
-
+    
     const query = `
       SELECT h.*, e.nombre as nombre_empleado 
       FROM horarios h
@@ -1481,40 +1327,41 @@ async function consultarHorarioPorDia(dia) {
       WHERE h.dia_semana = ?
       ORDER BY h.hora_inicio
     `;
-
+    
     const horarios = await executeQuery(query, [diaConsulta]);
-
+    
     if (horarios.length === 0) {
-      return {
+      return { 
         mensaje: `No hay horarios disponibles para ${diaConsulta}`,
         dia: diaConsulta,
-        horarios: [],
+        horarios: []
       };
     }
-
+    
     // Formatear horarios para este día
-    const horariosFormateados = horarios.map((h) => {
-      const horaInicio = h.hora_inicio?.substring(0, 5) || "";
-      const horaFin = h.hora_fin?.substring(0, 5) || "";
-
+    const horariosFormateados = horarios.map(h => {
+      const horaInicio = h.hora_inicio?.substring(0, 5) || '';
+      const horaFin = h.hora_fin?.substring(0, 5) || '';
+      
       return {
         horario: `${horaInicio} - ${horaFin}`,
-        empleado: h.nombre_empleado || "General",
-        duracion: h.duracion || 0,
+        empleado: h.nombre_empleado || 'General',
+        duracion: h.duracion || 0
       };
     });
-
+    
     // Generar texto formateado
     const textoHorarios = horariosFormateados
-      .map((h) => h.horario)
+      .map(h => h.horario)
       .filter((v, i, a) => a.indexOf(v) === i) // Eliminar duplicados
       .join(", ");
-
+    
     return {
       dia: diaConsulta,
       horarios: horariosFormateados,
-      texto_horarios: `${diaConsulta}: ${textoHorarios}`,
+      texto_horarios: `${diaConsulta}: ${textoHorarios}`
     };
+    
   } catch (error) {
     logger.error(`Error al consultar horario por día: ${error.message}`);
     return { error: `No pudimos obtener los horarios para ${dia}` };
@@ -1528,30 +1375,23 @@ router.get("/perfil-empresa", async (req, res) => {
   try {
     const query = "SELECT * FROM inf_perfil_empresa LIMIT 1";
     const resultado = await executeQuery(query);
-
+    
     if (resultado.length === 0) {
       return res.status(404).json({ error: "Perfil de empresa no encontrado" });
     }
-
+    
     const empresa = resultado[0];
-
+    
     // Formatear dirección completa
     if (empresa.calle_numero && empresa.localidad) {
-      empresa.direccion_completa = `${empresa.calle_numero}, ${
-        empresa.localidad
-      }, ${empresa.municipio || ""}, ${empresa.estado || ""}, C.P. ${
-        empresa.codigo_postal || ""
-      }`
-        .replace(/,\s+,/g, ",")
-        .replace(/,\s+$/g, "");
+      empresa.direccion_completa = `${empresa.calle_numero}, ${empresa.localidad}, ${empresa.municipio || ''}, ${empresa.estado || ''}, C.P. ${empresa.codigo_postal || ''}`.replace(/,\s+,/g, ',').replace(/,\s+$/g, '');
     }
-
+    
     return res.json(empresa);
+    
   } catch (error) {
     logger.error(`Error al obtener perfil de empresa: ${error.message}`);
-    return res
-      .status(500)
-      .json({ error: "Error al obtener perfil de empresa" });
+    return res.status(500).json({ error: "Error al obtener perfil de empresa" });
   }
 });
 
@@ -1561,33 +1401,31 @@ router.get("/perfil-empresa", async (req, res) => {
 router.get("/acerca-de/:tipo", async (req, res) => {
   try {
     let { tipo } = req.params;
-
+    
     // Validar el tipo
-    const tiposPermitidos = ["Historia", "Misión", "Visión", "Valores"];
+    const tiposPermitidos = ['Historia', 'Misión', 'Visión', 'Valores'];
     tipo = tipo.charAt(0).toUpperCase() + tipo.slice(1).toLowerCase();
-
+    
     // Verificar abreviaturas comunes
-    if (tipo === "Mision") tipo = "Misión";
-    if (tipo === "Vision") tipo = "Visión";
-
+    if (tipo === 'Mision') tipo = 'Misión';
+    if (tipo === 'Vision') tipo = 'Visión';
+    
     if (!tiposPermitidos.includes(tipo)) {
-      return res.status(400).json({
-        error: "Tipo no válido",
-        tipos_permitidos: tiposPermitidos,
+      return res.status(400).json({ 
+        error: "Tipo no válido", 
+        tipos_permitidos: tiposPermitidos 
       });
     }
-
-    const query =
-      "SELECT * FROM acerca_de WHERE tipo = ? ORDER BY fecha_actualizacion DESC LIMIT 1";
+    
+    const query = "SELECT * FROM acerca_de WHERE tipo = ? ORDER BY fecha_actualizacion DESC LIMIT 1";
     const resultado = await executeQuery(query, [tipo]);
-
+    
     if (resultado.length === 0) {
-      return res
-        .status(404)
-        .json({ error: `No se encontró información sobre ${tipo}` });
+      return res.status(404).json({ error: `No se encontró información sobre ${tipo}` });
     }
-
+    
     return res.json(resultado[0]);
+    
   } catch (error) {
     logger.error(`Error al obtener acerca de: ${error.message}`);
     return res.status(500).json({ error: "Error al obtener información" });
@@ -1601,6 +1439,7 @@ router.get("/redes-sociales", async (req, res) => {
   try {
     const datos = await consultarRedesSociales();
     return res.json(datos);
+    
   } catch (error) {
     logger.error(`Error al obtener redes sociales: ${error.message}`);
     return res.status(500).json({ error: "Error al obtener redes sociales" });
@@ -1613,44 +1452,45 @@ router.get("/redes-sociales", async (req, res) => {
 router.get("/legal/:tipo", async (req, res) => {
   try {
     const { tipo } = req.params;
-
+    
     // Mapear tipo a tabla
     let tabla;
     switch (tipo.toLowerCase()) {
-      case "deslinde":
-        tabla = "inf_deslinde";
+      case 'deslinde':
+        tabla = 'inf_deslinde';
         break;
-      case "terminos":
-      case "términos":
-      case "condiciones":
-        tabla = "inf_terminos_condiciones";
+      case 'terminos':
+      case 'términos':
+      case 'condiciones':
+        tabla = 'inf_terminos_condiciones';
         break;
-      case "privacidad":
-      case "politicas":
-      case "políticas":
-        tabla = "inf_politicas_privacidad";
+      case 'privacidad':
+      case 'politicas':
+      case 'políticas':
+        tabla = 'inf_politicas_privacidad';
         break;
       default:
-        return res.status(400).json({
+        return res.status(400).json({ 
           error: "Tipo no válido",
-          tipos_permitidos: ["deslinde", "terminos", "privacidad"],
+          tipos_permitidos: ["deslinde", "terminos", "privacidad"]
         });
     }
-
+    
     const query = `
       SELECT * FROM ${tabla}
       WHERE estado = 'activo'
       ORDER BY version DESC, fecha_actualizacion DESC
       LIMIT 1
     `;
-
+    
     const resultado = await executeQuery(query);
-
+    
     if (resultado.length === 0) {
       return res.status(404).json({ error: "Documento legal no encontrado" });
     }
-
+    
     return res.json(resultado[0]);
+    
   } catch (error) {
     logger.error(`Error al obtener documento legal: ${error.message}`);
     return res.status(500).json({ error: "Error al obtener documento legal" });
@@ -1661,11 +1501,11 @@ router.get("/legal/:tipo", async (req, res) => {
  * Endpoint para verificar si el servicio está activo
  */
 router.get("/status", (req, res) => {
-  return res.json({
-    status: "online",
+  return res.json({ 
+    status: "online", 
     mensaje: "Chatbot dental funcionando correctamente",
     version: "2.0.0",
-    timestamp: new Date(),
+    timestamp: new Date()
   });
 });
 
@@ -1674,49 +1514,38 @@ router.get("/status", (req, res) => {
  */
 router.post("/admin/patron", async (req, res) => {
   try {
-    const {
-      id,
-      patron,
-      categoria,
+    const { 
+      id, 
+      patron, 
+      categoria, 
       respuestas,
       es_plantilla,
       tabla_consulta,
       campo_consulta,
       condicion,
       prioridad,
-      comentario,
+      comentario
     } = req.body;
-
+    
     // Validar datos obligatorios
     if (!patron || !categoria || !respuestas) {
-      return res
-        .status(400)
-        .json({
-          error: "Faltan datos obligatorios (patron, categoria, respuestas)",
-        });
+      return res.status(400).json({ error: "Faltan datos obligatorios (patron, categoria, respuestas)" });
     }
-
+    
     // Validar categoría
     const categoriasPermitidas = [
-      "General",
-      "Servicios",
-      "Citas",
-      "Precios",
-      "Horario",
-      "Contacto",
-      "Ubicacion",
-      "Redes",
-      "Empresa",
-      "Legal",
+      'General', 'Servicios', 'Citas', 'Precios', 
+      'Horario', 'Contacto', 'Ubicacion', 'Redes',
+      'Empresa', 'Legal'
     ];
-
+    
     if (!categoriasPermitidas.includes(categoria)) {
-      return res.status(400).json({
-        error: "Categoría no válida",
-        categorias_permitidas: categoriasPermitidas,
+      return res.status(400).json({ 
+        error: "Categoría no válida", 
+        categorias_permitidas: categoriasPermitidas 
       });
     }
-
+    
     // Si tiene ID, actualizar; si no, insertar
     if (id) {
       const query = `
@@ -1733,52 +1562,60 @@ router.post("/admin/patron", async (req, res) => {
         fecha_actualizacion = NOW()
         WHERE id = ?
       `;
-
-      await executeQuery(query, [
-        patron,
-        categoria,
-        respuestas,
-        es_plantilla ? 1 : 0,
-        tabla_consulta || null,
-        campo_consulta || null,
-        condicion || null,
-        prioridad || 5,
-        comentario || null,
+      
+      await executeQuery(
+        query, 
+        [
+          patron, 
+          categoria, 
+          respuestas, 
+          es_plantilla ? 1 : 0, 
+          tabla_consulta || null, 
+          campo_consulta || null, 
+          condicion || null, 
+          prioridad || 5,
+          comentario || null,
+          id
+        ]
+      );
+      
+      return res.json({ 
+        mensaje: "Patrón actualizado correctamente", 
         id,
-      ]);
-
-      return res.json({
-        mensaje: "Patrón actualizado correctamente",
-        id,
         patron,
-        categoria,
+        categoria
       });
+      
     } else {
       const query = `
         INSERT INTO chatbot
         (patron, categoria, respuestas, es_plantilla, tabla_consulta, campo_consulta, condicion, prioridad, comentario, fecha_creacion)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())
       `;
-
-      const result = await executeQuery(query, [
-        patron,
-        categoria,
-        respuestas,
-        es_plantilla ? 1 : 0,
-        tabla_consulta || null,
-        campo_consulta || null,
-        condicion || null,
-        prioridad || 5,
-        comentario || null,
-      ]);
-
-      return res.json({
-        mensaje: "Patrón agregado correctamente",
+      
+      const result = await executeQuery(
+        query, 
+        [
+          patron, 
+          categoria, 
+          respuestas, 
+          es_plantilla ? 1 : 0, 
+          tabla_consulta || null, 
+          campo_consulta || null, 
+          condicion || null, 
+          prioridad || 5,
+          comentario || null
+        ]
+      );
+      
+      return res.json({ 
+        mensaje: "Patrón agregado correctamente", 
         id: result.insertId,
         patron,
-        categoria,
+        categoria
       });
     }
+    
   } catch (error) {
     logger.error(`Error en administración de patrones: ${error.message}`);
     return res.status(500).json({ error: "Error al procesar el patrón" });
@@ -1791,30 +1628,31 @@ router.post("/admin/patron", async (req, res) => {
 router.delete("/admin/patron/:id", async (req, res) => {
   try {
     const { id } = req.params;
-
+    
     // Obtener información del patrón antes de eliminarlo
     const queryInfo = "SELECT patron, categoria FROM chatbot WHERE id = ?";
     const infoResultado = await executeQuery(queryInfo, [id]);
-
+    
     if (infoResultado.length === 0) {
       return res.status(404).json({ error: "Patrón no encontrado" });
     }
-
+    
     const { patron, categoria } = infoResultado[0];
-
+    
     // Eliminar el patrón
     const query = "DELETE FROM chatbot WHERE id = ?";
     const result = await executeQuery(query, [id]);
-
+    
     if (result.affectedRows === 0) {
       return res.status(404).json({ error: "No se pudo eliminar el patrón" });
     }
-
-    return res.json({
+    
+    return res.json({ 
       mensaje: "Patrón eliminado correctamente",
       patron,
-      categoria,
+      categoria
     });
+    
   } catch (error) {
     logger.error(`Error al eliminar patrón: ${error.message}`);
     return res.status(500).json({ error: "Error al eliminar patrón" });
@@ -1832,10 +1670,11 @@ router.get("/admin/categorias", async (req, res) => {
       GROUP BY categoria
       ORDER BY categoria
     `;
-
+    
     const categorias = await executeQuery(query);
-
+    
     return res.json({ categorias });
+    
   } catch (error) {
     logger.error(`Error al obtener categorías: ${error.message}`);
     return res.status(500).json({ error: "Error al obtener categorías" });
@@ -1848,22 +1687,23 @@ router.get("/admin/categorias", async (req, res) => {
 router.post("/aprendizaje", async (req, res) => {
   try {
     const { mensaje, fecha } = req.body;
-
+    
     if (!mensaje) {
       return res.status(400).json({ error: "El mensaje no puede estar vacío" });
     }
-
+    
     const query = `
       INSERT INTO chatbot_aprendizaje (mensaje, fecha, estado)
       VALUES (?, ?, 'nuevo')
     `;
-
+    
     const result = await executeQuery(query, [mensaje, fecha || new Date()]);
-
-    return res.json({
-      mensaje: "Consulta guardada para aprendizaje",
-      id: result.insertId,
+    
+    return res.json({ 
+      mensaje: "Consulta guardada para aprendizaje", 
+      id: result.insertId 
     });
+    
   } catch (error) {
     logger.error(`Error al guardar aprendizaje: ${error.message}`);
     return res.status(500).json({ error: "Error al guardar la consulta" });
@@ -1882,9 +1722,9 @@ router.get("/estadisticas", async (req, res) => {
       GROUP BY categoria
       ORDER BY total DESC
     `;
-
+    
     const patrones = await executeQuery(queryPatrones);
-
+    
     // Total de servicios por categoría
     const queryServicios = `
       SELECT category, COUNT(*) as total
@@ -1893,9 +1733,9 @@ router.get("/estadisticas", async (req, res) => {
       GROUP BY category
       ORDER BY total DESC
     `;
-
+    
     const servicios = await executeQuery(queryServicios);
-
+    
     // Consultas recientes sin respuesta
     const querySinRespuesta = `
       SELECT mensaje, fecha, id
@@ -1904,23 +1744,24 @@ router.get("/estadisticas", async (req, res) => {
       ORDER BY fecha DESC
       LIMIT 10
     `;
-
+    
     const sinRespuesta = await executeQuery(querySinRespuesta);
-
+    
     return res.json({
       patrones: {
         porCategoria: patrones,
-        total: patrones.reduce((sum, item) => sum + item.total, 0),
+        total: patrones.reduce((sum, item) => sum + item.total, 0)
       },
       servicios: {
         porCategoria: servicios,
-        total: servicios.reduce((sum, item) => sum + item.total, 0),
+        total: servicios.reduce((sum, item) => sum + item.total, 0)
       },
       sinRespuesta: {
         consultas: sinRespuesta,
-        total: sinRespuesta.length,
-      },
+        total: sinRespuesta.length
+      }
     });
+    
   } catch (error) {
     logger.error(`Error al obtener estadísticas: ${error.message}`);
     return res.status(500).json({ error: "Error al obtener estadísticas" });
