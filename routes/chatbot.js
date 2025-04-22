@@ -68,55 +68,63 @@ router.post("/mensaje", async (req, res) => {
  * @returns {object} - Respuesta estructurada para el usuario
  */
 async function procesarMensaje(mensaje, contexto = {}) {
-  try {
-    // Normalizar el mensaje (minúsculas, quitar caracteres especiales, etc.)
-    const mensajeNormalizado = normalizarTexto(mensaje);
-
-    // 1. Extraer entidades/servicios específicos del mensaje
-    const entidades = extraerEntidades(mensajeNormalizado);
-
-    // 2. Buscar intenciones que coincidan con el mensaje
-    const intencion = await buscarIntencion(mensajeNormalizado);
-
-    // Si no encontramos ninguna intención, devolvemos respuesta por defecto
-    if (!intencion) {
-      // Intento de respuesta basada en entidades encontradas
-      if (entidades.servicios.length > 0) {
-        const servicio = entidades.servicios[0];
-        const datoServicio = await consultarPrecioServicio(servicio);
-
-        if (datoServicio && !datoServicio.error) {
+    try {
+      // Normalizar el mensaje
+      const mensajeNormalizado = normalizarTexto(mensaje);
+      
+      // CAMBIO CRUCIAL: Primero buscar si hay un servicio específico mencionado
+      const servicios = await extraerServicios(mensajeNormalizado);
+      
+      if (servicios.length > 0) {
+        // Si se menciona un servicio específico, priorizar esta consulta
+        const datosServicio = await consultarPrecioServicio(servicios[0]);
+        
+        if (datosServicio && !datosServicio.error) {
+          // Construir una respuesta detallada sobre el servicio
+          const respuestaDetallada = construirRespuestaServicio(datosServicio);
+          
           return {
-            respuesta: `No estoy seguro exactamente qué quieres saber sobre ${servicio}, pero te puedo decir que su precio es $${datoServicio.precio} MXN. ¿Necesitas más información sobre este tratamiento?`,
+            respuesta: respuestaDetallada,
             tipo: "Servicios",
-            subtipo: "precio_fallback",
-            datos: datoServicio,
-            entidades,
+            subtipo: "servicio_especifico",
+            datos: datosServicio
           };
         }
       }
-
-      return {
-        respuesta:
-          "Lo siento, no entendí tu consulta. ¿Podrías ser más específico o preguntar de otra manera? Puedo ayudarte con información sobre nuestros servicios, precios, horarios o formas de contacto.",
-        tipo: "default",
-        datos: null,
-        entidades,
-      };
+      
+      // Si no hay servicio específico, continuar con el proceso normal
+      // [Resto del código procesarMensaje actual]
+    } catch (error) {
+      logger.error(`Error al procesar mensaje: ${error.stack}`);
+      throw error;
     }
-
-    // 3. Generar respuesta según la intención, considerando las entidades encontradas
-    return await generarRespuesta(
-      intencion,
-      mensajeNormalizado,
-      entidades,
-      contexto
-    );
-  } catch (error) {
-    logger.error(`Error al procesar mensaje: ${error.stack}`);
-    throw error;
   }
-}
+  
+  // Función para construir respuesta detallada sobre un servicio
+  function construirRespuestaServicio(datosServicio) {
+    let respuesta = `**${datosServicio.servicio || datosServicio.nombre}**\n`;
+    respuesta += `Precio: $${datosServicio.precio} MXN\n`;
+    
+    if (datosServicio.duracion) {
+      respuesta += `Duración aproximada: ${datosServicio.duracion}\n`;
+    }
+    
+    if (datosServicio.descripcion) {
+      respuesta += `\n${datosServicio.descripcion}\n`;
+    }
+    
+    if (datosServicio.beneficios) {
+      respuesta += `\nBeneficios: ${datosServicio.beneficios}\n`;
+    }
+    
+    if (datosServicio.incluye) {
+      respuesta += `\nIncluye: ${datosServicio.incluye}\n`;
+    }
+    
+    respuesta += "\n¿Deseas agendar una cita para este servicio o tienes alguna otra pregunta?";
+    
+    return respuesta;
+  }
 
 /**
  * Normaliza el texto del mensaje para facilitar el procesamiento
@@ -224,90 +232,42 @@ function extraerEntidades(mensaje) {
  * @returns {array} - Array con los servicios encontrados
  */
 function extraerServicios(mensaje) {
-  // Definición de servicios y sus sinónimos para una detección más robusta
-  const catalogoServicios = [
-    {
-      nombre: "limpieza dental",
-      alternativas: ["limpieza", "profilaxis", "higiene"],
-    },
-    {
-      nombre: "blanqueamiento",
-      alternativas: ["blanquear", "aclarar dientes", "dientes blancos"],
-    },
-    {
-      nombre: "ortodoncia",
-      alternativas: [
-        "brackets",
-        "frenos",
-        "alineadores",
-        "alinear",
-        "enderezar",
-      ],
-    },
-    {
-      nombre: "implante",
-      alternativas: ["implantes", "implante dental", "implantacion"],
-    },
-    {
-      nombre: "endodoncia",
-      alternativas: ["matar nervio", "conducto", "nervio"],
-    },
-    {
-      nombre: "extracción",
-      alternativas: ["sacar", "quitar", "remover", "muela", "extraccion"],
-    },
-    {
-      nombre: "consulta",
-      alternativas: [
-        "revision",
-        "chequeo",
-        "evaluacion",
-        "diagnostico",
-        "diagnóstico",
-      ],
-    },
-    { nombre: "carilla", alternativas: ["carillas", "funda", "fundas"] },
-    { nombre: "corona", alternativas: ["coronas", "funda", "fundas"] },
-    {
-      nombre: "empaste",
-      alternativas: [
-        "empastar",
-        "tapar",
-        "caries",
-        "resina",
-        "amalgama",
-        "calza",
-      ],
-    },
-    { nombre: "prótesis", alternativas: ["protesis", "dentadura", "puente"] },
-    {
-      nombre: "invisalign",
-      alternativas: ["alineador", "alineadores", "invisible"],
-    },
-    {
-      nombre: "muelas del juicio",
-      alternativas: ["cordal", "cordales", "juicio"],
-    },
-  ];
-
-  const serviciosEncontrados = [];
-
-  // Buscar cada servicio y sus alternativas en el mensaje
-  catalogoServicios.forEach((servicio) => {
-    if (mensaje.includes(servicio.nombre)) {
-      serviciosEncontrados.push(servicio.nombre);
-    } else {
-      for (const alternativa of servicio.alternativas) {
-        if (mensaje.includes(alternativa)) {
-          serviciosEncontrados.push(servicio.nombre);
-          break;
+    // Obtener lista completa de servicios desde la base de datos (si es posible cachear)
+    return obtenerServiciosCache().then(serviciosDisponibles => {
+      const serviciosEncontrados = [];
+      
+      // Primera pasada: buscar coincidencias exactas (con y sin acentos)
+      for (const servicio of serviciosDisponibles) {
+        // Normalizar nombre de servicio (sin acentos, minúsculas)
+        const servicioNormalizado = servicio.toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        
+        const mensajeNormalizado = mensaje.toLowerCase()
+          .normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        
+        // Verificar coincidencia exacta
+        if (mensajeNormalizado.includes(servicioNormalizado)) {
+          return [servicio]; // Retorna inmediatamente si hay coincidencia exacta
         }
       }
+      
+      // Si no hay coincidencias exactas, continuar con el método actual
+      // [Resto del código de extraerServicios actual]
+      
+      return serviciosEncontrados;
+    });
+  }
+  
+  // Función para obtener y cachear servicios
+  async function obtenerServiciosCache() {
+    if (!global.serviciosCache || Date.now() - global.serviciosCacheTime > 3600000) {
+      const query = "SELECT title FROM servicios";
+      const servicios = await executeQuery(query);
+      global.serviciosCache = servicios.map(s => s.title);
+      global.serviciosCacheTime = Date.now();
     }
-  });
-
-  return serviciosEncontrados;
-}
+    return global.serviciosCache;
+  }
 
 /**
  * Busca una intención que coincida con el mensaje del usuario
