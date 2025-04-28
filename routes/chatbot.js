@@ -28,7 +28,7 @@ const executeQuery = (query, params = []) => {
  */
 router.post("/mensaje", async (req, res) => {
   try {
-    const { mensaje, contexto } = req.body;
+    const { mensaje, contexto = {} } = req.body;
     
     // Validación básica
     if (!mensaje || mensaje.trim() === "") {
@@ -42,7 +42,14 @@ router.post("/mensaje", async (req, res) => {
     const respuesta = await procesarMensaje(mensaje, contexto);
     logger.info(`Mensaje procesado: "${mensaje.substring(0, 50)}..." - Tipo: ${respuesta.tipo}`);
     
-    return res.json(respuesta);
+    // Verificar si necesitamos mantener contexto para la siguiente interacción
+    // Por ejemplo, si estamos en medio de una consulta de citas
+    const nuevoContexto = respuesta.contexto || {};
+    
+    return res.json({
+      ...respuesta,
+      contexto: nuevoContexto
+    });
     
   } catch (error) {
     logger.error(`Error en /chatbot/mensaje: ${error.message}`);
@@ -67,57 +74,224 @@ async function procesarMensaje(mensaje, contexto = {}) {
     
     // 1. Extraer entidades/servicios específicos del mensaje
     const entidades = extraerEntidades(mensajeNormalizado);
+    entidades.tratamientos = await extraerTratamientos(mensajeNormalizado);
     
-    // 2. Buscar intenciones que coincidan con el mensaje
+    // 2. Verificar si es una consulta de citas existentes
+    if (entidades.citas && (contexto.esperandoIdentificador === true || contexto.procesandoCita === true)) {
+      // Verificar si estamos esperando un identificador (correo o teléfono)
+      if (contexto.esperandoIdentificador === true) {
+        // Detectar si el mensaje parece un correo o teléfono
+        const posibleCorreo = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/.test(mensaje);
+        const posibleTelefono = /\b\d{8,12}\b/.test(mensaje.replace(/[\s-]/g, ''));
+        
+        if (posibleCorreo || posibleTelefono) {
+          const identificador = posibleCorreo 
+            ? mensaje.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b/)[0]
+            : mensaje.replace(/[\s-]/g, '').match(/\b\d{8,12}\b/)[0];
+          
+          const infoCitas = await consultarCitasPaciente(identificador);
+          return {
+            respuesta: infoCitas.error 
+              ? `${infoCitas.error}. ${infoCitas.mensaje || ''}`
+              : `${infoCitas.mensaje} ${infoCitas.citas.map(c => `${c.servicio} - ${c.fecha} a las ${c.hora}`).join(', ')}. ${infoCitas.recordatorio || ''}`,
+            tipo: "Citas",
+            subtipo: "consulta_resultado",
+            datos: infoCitas,
+            entidades,
+            contexto: { procesandoCita: false, esperandoIdentificador: false }
+          };
+        } else {
+          return {
+            respuesta: "No he podido reconocer un correo electrónico o número telefónico válido. Por favor, proporciona tu correo electrónico o número telefónico exactamente como lo registraste.",
+            tipo: "Citas",
+            subtipo: "solicitud_identificador",
+            datos: null,
+            entidades,
+            contexto: { esperandoIdentificador: true }
+          };
+        }
+      }
+      
+      // Si solo está preguntando sobre citas, pero aún no ha proporcionado identificador
+      if (mensajeNormalizado.includes("mi cita") || mensajeNormalizado.includes("mis citas") || mensajeNormalizado.includes("tengo cita")) {
+        return {
+          respuesta: "Para consultar tus citas, necesito que me proporciones tu correo electrónico o número telefónico con el que te registraste.",
+          tipo: "Citas",
+          subtipo: "solicitud_identificador",
+          datos: null,
+          entidades,
+          contexto: { esperandoIdentificador: true }
+        };
+      }
+    }
+    
+    // 3. Buscar intenciones que coincidan con el mensaje
     const intencion = await buscarIntencion(mensajeNormalizado);
     
-    // Si no encontramos ninguna intención, devolvemos respuesta por defecto
+    // 4. Manejar casos específicos si no encontramos una intención clara
     if (!intencion) {
-      // Intento de respuesta basada en entidades encontradas
-      if (entidades.tratamientos.length > 0) {
+      // Verificar si es una consulta sobre servicios específicos
+      if (entidades.tratamientos && entidades.tratamientos.length > 0) {
         const tratamiento = entidades.tratamientos[0];
         const datoTratamiento = await consultarTratamiento(tratamiento);
         
         if (datoTratamiento && !datoTratamiento.error) {
+          let respuesta = `Ofrecemos el servicio de ${datoTratamiento.nombre || tratamiento}.`;
+          
+          if (datoTratamiento.precio) {
+            respuesta += ` El precio es ${datoTratamiento.precio} MXN.`;
+          }
+          
+          if (datoTratamiento.duracion) {
+            respuesta += ` La duración aproximada es ${datoTratamiento.duracion}.`;
+          }
+          
+          if (datoTratamiento.descripcion) {
+            respuesta += ` ${datoTratamiento.descripcion}`;
+          }
+          
+          // Verificar si es un tratamiento o un servicio normal
+          const esTratamiento = datoTratamiento.categoria === 'Periodoncia' || 
+                              datoTratamiento.categoria === 'Ortodoncia' || 
+                              datoTratamiento.categoria === 'Cirugía';
+          
+          if (esTratamiento) {
+            respuesta += " Este es un tratamiento que requiere múltiples citas y un plan personalizado.";
+          }
+          
           return {
-            respuesta: `No estoy seguro exactamente qué quieres saber sobre ${tratamiento}, pero puedo decirte que es uno de los servicios que ofrecemos. ¿Necesitas información específica sobre este tratamiento?`,
-            tipo: "Tratamientos",
-            subtipo: "tratamiento_fallback",
+            respuesta: respuesta,
+            tipo: "Servicios",
+            subtipo: esTratamiento ? "tratamiento_especifico" : "servicio_especifico",
             datos: datoTratamiento,
             entidades
           };
         }
       }
       
-      // Si es una consulta general sobre tratamientos sin entidades específicas
+      // Verificar si es una consulta sobre el perfil de la empresa
+      if (entidades.empresa) {
+        const perfilEmpresa = await consultarPerfilEmpresa();
+        
+        if (perfilEmpresa && !perfilEmpresa.error) {
+          return {
+            respuesta: `Somos ${perfilEmpresa.nombre_pagina || 'una clínica dental especializada'}. ${perfilEmpresa.descripcion || 'Ofrecemos servicios dentales de alta calidad para toda la familia.'}`,
+            tipo: "Empresa",
+            subtipo: "perfil",
+            datos: perfilEmpresa,
+            entidades
+          };
+        }
+      }
+      
+      // Verificar si es una consulta sobre horarios
+      if (entidades.horarios) {
+        const horarios = await consultarHorarios();
+        
+        if (horarios && !horarios.error) {
+          return {
+            respuesta: `Nuestros horarios de atención son: ${horarios.horarios || 'Lunes a Viernes de 9:00 a 18:00 horas.'}`,
+            tipo: "Horario",
+            subtipo: "general",
+            datos: horarios,
+            entidades
+          };
+        }
+      }
+      
+      // Si es una consulta general sobre servicios
       if (mensajeNormalizado.includes("servicio") || mensajeNormalizado.includes("tratamiento")) {
         const datosTratamientos = await consultarTratamientos();
         
         if (datosTratamientos && !datosTratamientos.error) {
           return {
-            respuesta: `Ofrecemos los siguientes tratamientos dentales: ${datosTratamientos.servicios}. ¿Deseas información sobre alguno en particular?`,
-            tipo: "Tratamientos",
+            respuesta: `Ofrecemos los siguientes servicios dentales: ${datosTratamientos.servicios}. ¿Deseas información sobre alguno en particular?`,
+            tipo: "Servicios",
             subtipo: "listado_general",
             datos: datosTratamientos,
             entidades
           };
         }
       }
+
+      // Buscar en preguntas frecuentes si no hay una intención clara
+      const preguntaFrecuente = await buscarPreguntaFrecuente(mensajeNormalizado);
+      if (preguntaFrecuente) {
+        return {
+          respuesta: preguntaFrecuente.respuesta,
+          tipo: "PreguntaFrecuente",
+          subtipo: "pregunta_respuesta",
+          datos: preguntaFrecuente,
+          entidades
+        };
+      }
       
+      // Respuesta por defecto si no se encuentra ninguna intención específica
       return {
-        respuesta: "Lo siento, no entendí tu consulta. ¿Podrías ser más específico o preguntar de otra manera? Puedo ayudarte con información sobre nuestros tratamientos, horarios, citas o formas de contacto.",
+        respuesta: "Lo siento, no entendí tu consulta. ¿Podrías ser más específico o preguntar de otra manera? Puedo ayudarte con información sobre nuestros servicios, horarios o verificar tus citas existentes.",
         tipo: "default",
         datos: null,
         entidades
       };
     }
     
-    // 3. Generar respuesta según la intención, considerando las entidades encontradas
+    // 5. Generar respuesta según la intención, considerando las entidades encontradas
     return await generarRespuesta(intencion, mensajeNormalizado, entidades, contexto);
     
   } catch (error) {
     logger.error(`Error al procesar mensaje: ${error.stack}`);
     throw error;
+  }
+}
+
+/**
+ * Busca una pregunta frecuente que coincida con el mensaje
+ * @param {string} mensaje - Mensaje normalizado del usuario
+ * @returns {object|null} - Pregunta frecuente encontrada o null
+ */
+async function buscarPreguntaFrecuente(mensaje) {
+  try {
+    // Consulta para buscar preguntas similares
+    const query = `
+      SELECT id, pregunta, respuesta
+      FROM preguntas_frecuentes
+      WHERE 
+        estado = 'registrado' AND
+        (
+          MATCH(pregunta) AGAINST(? IN BOOLEAN MODE) OR
+          pregunta LIKE ? OR
+          ? LIKE CONCAT('%', pregunta, '%')
+        )
+      ORDER BY 
+        CASE 
+          WHEN pregunta LIKE ? THEN 1
+          WHEN ? LIKE CONCAT('%', pregunta, '%') THEN 2
+          ELSE 3
+        END,
+        LENGTH(pregunta) DESC
+      LIMIT 1
+    `;
+    
+    const palabrasClave = mensaje.split(' ').filter(p => p.length > 3).join(' ');
+    const resultados = await executeQuery(
+      query, 
+      [
+        palabrasClave, 
+        `%${mensaje}%`,
+        mensaje,
+        `%${mensaje}%`,
+        mensaje
+      ]
+    );
+    
+    if (resultados.length > 0) {
+      return resultados[0];
+    }
+    
+    return null;
+  } catch (error) {
+    logger.error(`Error al buscar pregunta frecuente: ${error.message}`);
+    return null;
   }
 }
 
@@ -151,7 +325,11 @@ function extraerEntidades(mensaje) {
     contacto: false,
     citas: false,
     educativo: false,
-    postTratamiento: false
+    postTratamiento: false,
+    pago: false,
+    redes: false,
+    legal: false,
+    empresa: false
   };
   
   // Palabras clave para detectar intención sobre horarios
@@ -178,6 +356,22 @@ function extraerEntidades(mensaje) {
   const palabrasPostTratamiento = ['despues', 'después', 'posterior', 'recuperacion', 'sangrado', 'hinchazón', 'dolor'];
   entidades.postTratamiento = palabrasPostTratamiento.some(palabra => mensaje.includes(palabra));
   
+  // Palabras clave para detectar intención sobre pagos
+  const palabrasPago = ['pago', 'precio', 'costo', 'tarjeta', 'efectivo', 'transferencia', 'valor', 'cuanto cuesta'];
+  entidades.pago = palabrasPago.some(palabra => mensaje.includes(palabra));
+  
+  // Palabras clave para detectar intención sobre redes sociales
+  const palabrasRedes = ['redes', 'facebook', 'instagram', 'twitter', 'tiktok', 'youtube', 'siguenos', 'social'];
+  entidades.redes = palabrasRedes.some(palabra => mensaje.includes(palabra));
+  
+  // Palabras clave para detectar intención sobre información legal
+  const palabrasLegal = ['legal', 'politica', 'privacidad', 'terminos', 'condiciones', 'deslinde', 'responsabilidad'];
+  entidades.legal = palabrasLegal.some(palabra => mensaje.includes(palabra));
+  
+  // Palabras clave para detectar intención sobre información de la empresa
+  const palabrasEmpresa = ['empresa', 'clinica', 'historia', 'mision', 'vision', 'valores', 'quienes son', 'acerca'];
+  entidades.empresa = palabrasEmpresa.some(palabra => mensaje.includes(palabra));
+  
   // Buscar tratamientos dentales mencionados
   entidades.tratamientos = extraerTratamientos(mensaje);
   
@@ -189,34 +383,94 @@ function extraerEntidades(mensaje) {
  * @param {string} mensaje - Mensaje del usuario normalizado
  * @returns {array} - Array con los tratamientos encontrados
  */
-function extraerTratamientos(mensaje) {
-  // Definición de tratamientos y sus sinónimos para una detección más robusta
-  const catalogoTratamientos = [
-    {nombre: "limpieza dental", alternativas: ["limpieza", "profilaxis", "higiene"]},
-    {nombre: "extracción", alternativas: ["sacar", "quitar", "remover", "muela", "extraccion"]},
-    {nombre: "consulta", alternativas: ["revision", "chequeo", "evaluacion", "diagnostico", "diagnóstico"]},
-    {nombre: "empaste", alternativas: ["empastar", "tapar", "caries", "resina", "amalgama", "calza"]},
-    {nombre: "brackets", alternativas: ["frenos", "alineadores", "alinear", "enderezar"]},
-    {nombre: "prótesis", alternativas: ["protesis", "dentadura", "puente"]}
-  ];
-  
-  const tratamientosEncontrados = [];
-  
-  // Buscar cada tratamiento y sus alternativas en el mensaje
-  catalogoTratamientos.forEach(tratamiento => {
-    if (mensaje.includes(tratamiento.nombre)) {
-      tratamientosEncontrados.push(tratamiento.nombre);
-    } else {
-      for (const alternativa of tratamiento.alternativas) {
-        if (mensaje.includes(alternativa)) {
-          tratamientosEncontrados.push(tratamiento.nombre);
-          break;
+async function extraerTratamientos(mensaje) {
+  try {
+    // Primero, obtenemos todos los servicios de la base de datos
+    const query = `
+      SELECT id, title, description, category 
+      FROM servicios
+      ORDER BY title
+    `;
+    
+    const servicios = await executeQuery(query);
+    
+    if (servicios.length === 0) {
+      return [];
+    }
+    
+    // Crear un catálogo dinámico con los servicios de la base de datos
+    const catalogoTratamientos = [];
+    
+    for (const servicio of servicios) {
+      // Generar alternativas desde el título y descripción
+      const palabrasClaveTitle = servicio.title.toLowerCase().split(/\s+/);
+      const palabrasClaveDesc = servicio.description 
+        ? servicio.description.toLowerCase().split(/\s+/).filter(p => p.length > 3)
+        : [];
+      
+      // Unir alternativas y eliminar duplicados
+      const alternativas = [...new Set([...palabrasClaveTitle, ...palabrasClaveDesc])];
+      
+      catalogoTratamientos.push({
+        id: servicio.id,
+        nombre: servicio.title.toLowerCase(),
+        categoria: servicio.category,
+        alternativas: alternativas.filter(a => a.length > 3 && a !== servicio.title.toLowerCase())
+      });
+    }
+    
+    const tratamientosEncontrados = [];
+    
+    // Buscar cada tratamiento y sus alternativas en el mensaje
+    catalogoTratamientos.forEach(tratamiento => {
+      if (mensaje.includes(tratamiento.nombre)) {
+        tratamientosEncontrados.push(tratamiento.nombre);
+      } else {
+        for (const alternativa of tratamiento.alternativas) {
+          if (mensaje.includes(alternativa)) {
+            tratamientosEncontrados.push(tratamiento.nombre);
+            break;
+          }
         }
       }
-    }
-  });
-  
-  return tratamientosEncontrados;
+    });
+    
+    return tratamientosEncontrados;
+  } catch (error) {
+    logger.error(`Error al extraer tratamientos: ${error.message}`);
+    // Catálogo de respaldo para detectar tratamientos básicos en caso de error
+    const catalogoBasico = [
+      {nombre: "limpieza dental", alternativas: ["limpieza", "profilaxis", "higiene"]},
+      {nombre: "consulta general", alternativas: ["revision", "chequeo", "evaluacion"]},
+      {nombre: "curetaje", alternativas: ["limpieza profunda", "raspado"]},
+      {nombre: "asesoría sobre diseño de sonrisa", alternativas: ["diseño", "sonrisa"]},
+      {nombre: "cirugía estética de encía", alternativas: ["cirugia", "encia"]},
+      {nombre: "obturación con resina", alternativas: ["obturacion", "resina", "empaste"]},
+      {nombre: "incrustación estética y de metal", alternativas: ["incrustacion", "metal"]},
+      {nombre: "coronas fijas estéticas o de metal", alternativas: ["corona", "fija"]},
+      {nombre: "placas removibles parciales", alternativas: ["placa", "parcial", "removible"]},
+      {nombre: "placas totales removibles", alternativas: ["placa", "total"]},
+      {nombre: "guardas dentales", alternativas: ["guarda", "protector"]}
+    ];
+    
+    const tratamientosEncontrados = [];
+    
+    // Buscar cada tratamiento básico y sus alternativas en el mensaje
+    catalogoBasico.forEach(tratamiento => {
+      if (mensaje.includes(tratamiento.nombre)) {
+        tratamientosEncontrados.push(tratamiento.nombre);
+      } else {
+        for (const alternativa of tratamiento.alternativas) {
+          if (mensaje.includes(alternativa)) {
+            tratamientosEncontrados.push(tratamiento.nombre);
+            break;
+          }
+        }
+      }
+    });
+    
+    return tratamientosEncontrados;
+  }
 }
 
 /**
@@ -304,6 +558,35 @@ async function buscarIntencion(mensaje) {
       return intencionesPalabras[0];
     }
     
+    // 5. Búsqueda por categoría basada en entidades detectadas
+    const entidades = extraerEntidades(mensaje);
+    let categoria = null;
+    
+    if (entidades.tratamientos.length > 0) categoria = 'Servicios';
+    else if (entidades.horarios) categoria = 'Horario';
+    else if (entidades.contacto) categoria = 'Contacto';
+    else if (entidades.citas) categoria = 'Citas';
+    else if (entidades.pago) categoria = 'Precios';
+    else if (entidades.redes) categoria = 'Redes';
+    else if (entidades.legal) categoria = 'Legal';
+    else if (entidades.empresa) categoria = 'Empresa';
+    
+    if (categoria) {
+      const queryCategoria = `
+        SELECT * FROM chatbot
+        WHERE categoria = ?
+        ORDER BY prioridad DESC
+        LIMIT 1
+      `;
+      
+      const intencionesCategoria = await executeQuery(queryCategoria, [categoria]);
+      
+      if (intencionesCategoria.length > 0) {
+        logger.debug(`Intención encontrada (por categoría): ${intencionesCategoria[0].patron}`);
+        return intencionesCategoria[0];
+      }
+    }
+    
     // Si llegamos aquí, no se encontró ninguna intención que coincida
     logger.info(`No se encontró intención para el mensaje: "${mensaje.substring(0, 50)}..."`);
     return null;
@@ -329,30 +612,30 @@ async function generarRespuesta(intencion, mensaje, entidades, contexto = {}) {
     
     // Si hay tratamientos específicos mencionados, priorizarlos en la consulta
     const hayTratamientoEspecifico = entidades.tratamientos.length > 0 && 
-                                    intencion.categoria === 'Tratamientos';
+                                    intencion.categoria === 'Servicios';
     
     if (hayTratamientoEspecifico) {
       const tratamiento = entidades.tratamientos[0];
       datosConsulta = await consultarTratamiento(tratamiento);
       
       // Si no encontramos información específica, pero tenemos una intención general
-      if (datosConsulta?.error && intencion.categoria === 'Tratamientos') {
+      if (datosConsulta?.error && intencion.categoria === 'Servicios') {
         datosConsulta = await consultarTratamientos();
       }
     } 
     // Si no hay tratamientos específicos, pero hay una intención definida
-    else if (intencion.tabla_consulta) {
+    else if (intencion.categoria) {
       datosConsulta = await realizarConsultaSegunCategoria(intencion, mensaje, entidades);
     }
     
     // 2. Obtener una respuesta aleatoria de las disponibles
-    const respuesta = seleccionarRespuestaAleatoria(intencion.respuestas);
+    const respuesta = seleccionarRespuestaAleatoria(intencion.respuesta);
     
     // 3. Si hay datos de consulta y la respuesta es una plantilla, reemplazar variables
     let respuestaFinal = respuesta;
     
     if (datosConsulta) {
-      if (intencion.es_plantilla) {
+      if (intencion.es_plantilla === 1) {
         // Verificar si todas las variables de la plantilla tienen datos
         const variablesEnPlantilla = (respuesta.match(/\{\{([^}]+)\}\}/g) || [])
           .map(v => v.replace(/\{\{|\}\}/g, ''));
@@ -406,7 +689,10 @@ function tieneValorPorDefecto(datos, variable) {
     'horarios': ['horario', 'horas_atencion'],
     'redes': ['redes_sociales', 'redes_lista'],
     'direccion': ['calle_numero', 'ubicacion', 'domicilio'],
-    'telefono': ['telefono_principal', 'contacto', 'celular']
+    'telefono': ['telefono_principal', 'contacto', 'celular'],
+    'precio': ['price', 'costo', 'valor'],
+    'descripcion': ['description', 'detalle', 'informacion'],
+    'contenido': ['texto', 'body', 'info']
   };
   
   // Verificar alternativas
@@ -433,7 +719,7 @@ async function realizarConsultaSegunCategoria(intencion, mensaje, entidades) {
       case 'Contacto':
         return await consultarContacto();
       
-      case 'Tratamientos':
+      case 'Servicios':
         if (entidades.tratamientos.length > 0) {
           return await consultarTratamiento(entidades.tratamientos[0]);
         } else {
@@ -443,22 +729,48 @@ async function realizarConsultaSegunCategoria(intencion, mensaje, entidades) {
       case 'Citas':
         return await consultarInfoCitas();
       
-      case 'Legal':
-        return await consultarInfoLegal(intencion);
-      
-      case 'Educativo':
-        return await consultarInfoEducativa(intencion);
-      
-      case 'Post-tratamiento':
+      case 'Precios':
         if (entidades.tratamientos.length > 0) {
-          return await consultarInfoPostTratamiento(entidades.tratamientos[0]);
+          const infoTratamiento = await consultarTratamiento(entidades.tratamientos[0]);
+          if (infoTratamiento) {
+            return {
+              servicio: infoTratamiento.servicio || infoTratamiento.nombre,
+              precio: infoTratamiento.precio || infoTratamiento.price,
+              duracion: infoTratamiento.duracion || infoTratamiento.duration,
+              descripcion: infoTratamiento.descripcion || infoTratamiento.description
+            };
+          }
+        }
+        return await consultarPreciosGenerales();
+      
+      case 'Legal':
+        if (mensaje.includes("privacidad") || mensaje.includes("datos personales")) {
+          return await consultarInfoLegal("inf_politicas_privacidad");
+        } else if (mensaje.includes("terminos") || mensaje.includes("condiciones")) {
+          return await consultarInfoLegal("inf_terminos_condiciones");
         } else {
-          return await consultarInfoPostTratamientoGeneral();
+          return await consultarInfoLegal("inf_deslinde");
+        }
+      
+      case 'Redes':
+        return await consultarRedesSociales();
+      
+      case 'Empresa':
+        if (mensaje.includes("historia")) {
+          return await consultarAcercaDe("Historia");
+        } else if (mensaje.includes("mision")) {
+          return await consultarAcercaDe("Misión");
+        } else if (mensaje.includes("vision")) {
+          return await consultarAcercaDe("Visión");
+        } else if (mensaje.includes("valores")) {
+          return await consultarAcercaDe("Valores");
+        } else {
+          return await consultarPerfilEmpresa();
         }
       
       default:
         // Consulta genérica para otras categorías
-        if (intencion.campo_consulta && intencion.tabla_consulta) {
+        if (intencion.tabla_consulta && intencion.campo_consulta) {
           return await consultaGenerica(
             intencion.tabla_consulta, 
             intencion.campo_consulta, 
@@ -470,6 +782,36 @@ async function realizarConsultaSegunCategoria(intencion, mensaje, entidades) {
   } catch (error) {
     logger.error(`Error en consulta según categoría: ${error.message}`);
     return { error: "Ocurrió un error al obtener la información solicitada" };
+  }
+}
+
+/**
+ * Consulta información "Acerca de" (Historia, Misión, etc.)
+ * @param {string} tipo - Tipo de información (Historia, Misión, Visión, Valores)
+ * @returns {object} - Datos obtenidos
+ */
+async function consultarAcercaDe(tipo) {
+  try {
+    const query = `
+      SELECT * FROM acerca_de
+      WHERE tipo = ?
+      LIMIT 1
+    `;
+    
+    const resultado = await executeQuery(query, [tipo]);
+    
+    if (resultado.length === 0) {
+      return { 
+        error: `No se encontró información sobre ${tipo.toLowerCase()}`,
+        tipo: tipo
+      };
+    }
+    
+    return resultado[0];
+    
+  } catch (error) {
+    logger.error(`Error al consultar acerca de: ${error.message}`);
+    return { error: "Error al obtener la información institucional" };
   }
 }
 
@@ -615,104 +957,137 @@ function formatearHorarios(horariosPorDia) {
 }
 
 /**
- * Consulta información sobre las citas
- * @returns {object} - Datos sobre citas
+ * Consulta información sobre las citas de un paciente
+ * @param {string} identificador - Correo o teléfono del paciente
+ * @returns {object} - Datos sobre citas del paciente
  */
-async function consultarInfoCitas() {
+async function consultarCitasPaciente(identificador) {
   try {
-    // Consulta información general sobre citas (en una implementación real,
-    // aquí podríamos consultar disponibilidad o políticas de citas)
-    return {
-      medios_agenda: "Puedes agendar citas a través de nuestra página web o directamente en la clínica.",
-      requisitos: "Para tu primera consulta, te recomendamos llegar 15 minutos antes para llenar tu ficha médica.",
-      politicas: "Para cancelaciones, te pedimos avisar con al menos 24 horas de anticipación.",
-      informacion_adicional: "Para una mejor atención, te recomendamos describir brevemente el motivo de tu consulta al agendar la cita."
-    };  
-  } catch (error) {
-    logger.error(`Error al consultar información de citas: ${error.message}`);
-    return { error: "No pudimos obtener la información sobre citas" };
-  }
-}
-
-/**
- * Consulta información sobre consejos educativos
- * @param {object} intencion - Intención detectada
- * @returns {object} - Información educativa dental
- */
-async function consultarInfoEducativa(intencion) {
-  try {
-    // En una implementación real, esta información podría venir de la base de datos
-    return {
-      consejos_generales: "Cepillado 3 veces al día con pasta fluorada, uso de hilo dental a diario, y visitas regulares al dentista cada 6 meses.",
-      alimentacion: "Limita alimentos azucarados, consume frutas y verduras crujientes, bebe agua en lugar de refrescos.",
-      prevencion: "La prevención es clave para mantener una buena salud bucal. Incluye higiene diaria y chequeos regulares."
-    };
-  } catch (error) {
-    logger.error(`Error al consultar información educativa: ${error.message}`);
-    return { error: "No pudimos obtener la información educativa solicitada" };
-  }
-}
-
-/**
- * Consulta información sobre post-tratamiento general
- * @returns {object} - Información post-tratamiento
- */
-async function consultarInfoPostTratamientoGeneral() {
-  try {
-    // En una implementación real, esta información podría venir de la base de datos
-    return {
-      cuidados_generales: "Después de cualquier tratamiento dental, evita alimentos muy duros, calientes o fríos durante las primeras 24 horas.",
-      signos_alarma: "Si experimentas dolor intenso, sangrado abundante o hinchazón que empeora, contacta a la clínica inmediatamente.",
-      medicamentos: "Toma los medicamentos recetados según las indicaciones específicas del dentista."
-    };
-  } catch (error) {
-    logger.error(`Error al consultar información post-tratamiento: ${error.message}`);
-    return { error: "No pudimos obtener la información post-tratamiento solicitada" };
-  }
-}
-
-/**
- * Consulta información post-tratamiento específica
- * @param {string} tratamiento - Tratamiento específico
- * @returns {object} - Información post-tratamiento específica
- */
-async function consultarInfoPostTratamiento(tratamiento) {
-  try {
-    // Diferentes instrucciones según el tratamiento
-    switch (tratamiento.toLowerCase()) {
-      case 'limpieza dental':
-        return {
-          cuidados: "Es normal sentir sensibilidad. Evita alimentos muy fríos o calientes por 24 horas.",
-          recomendaciones: "Continúa con tu rutina normal de cepillado y uso de hilo dental."
-        };
-      case 'extracción':
-        return {
-          cuidados: "Evita enjuagarte vigorosamente, escupir, usar popotes o fumar por 24 horas.",
-          recomendaciones: "Aplica hielo en el exterior de la cara para reducir inflamación. Toma los medicamentos recetados según las indicaciones."
-        };
-      case 'empaste':
-        return {
-          cuidados: "Espera a que pase el efecto de la anestesia antes de comer para evitar morderte.",
-          recomendaciones: "Si sientes que el empaste está alto al morder, contacta a la clínica para un ajuste."
-        };
-      default:
-        return await consultarInfoPostTratamientoGeneral();
+    if (!identificador) {
+      return { 
+        error: "Se requiere un correo electrónico o número telefónico para consultar tus citas"
+      };
     }
+    
+    // Verificar si es un correo o teléfono
+    const esCorreo = identificador.includes('@');
+    
+    // Consulta para buscar al paciente
+    const queryPaciente = esCorreo 
+      ? "SELECT id FROM citas WHERE correo = ?"
+      : "SELECT id FROM citas WHERE telefono = ?";
+    
+    const paciente = await executeQuery(queryPaciente, [identificador]);
+    
+    if (paciente.length === 0) {
+      return {
+        error: `No se encontraron citas asociadas con este ${esCorreo ? 'correo' : 'teléfono'}`,
+        mensaje: "Verifica que hayas proporcionado la información correcta o ponte en contacto con nosotros directamente para agendar una cita."
+      };
+    }
+    
+    // Consultar las citas pendientes del paciente
+    const queryCitas = `
+      SELECT c.*, 
+             s.title as servicio_nombre,
+             s.category as servicio_categoria,
+             o.nombre as odontologo_nombre
+      FROM citas c
+      LEFT JOIN servicios s ON c.servicio_id = s.id
+      LEFT JOIN empleados o ON c.odontologo_id = o.id
+      WHERE c.${esCorreo ? 'correo' : 'telefono'} = ? 
+        AND c.estado = 'Pendiente'
+      ORDER BY c.fecha_consulta ASC
+    `;
+    
+    const citas = await executeQuery(queryCitas, [identificador]);
+    
+    if (citas.length === 0) {
+      return {
+        mensaje: `No tienes citas pendientes asociadas con este ${esCorreo ? 'correo' : 'teléfono'}`,
+        sugerencia: "Si deseas agendar una nueva cita, te recomendamos contactarnos por teléfono o visitar nuestra página web."
+      };
+    }
+    
+    // Formatear las citas para una respuesta amigable
+    const citasFormateadas = citas.map(cita => {
+      // Formatear fecha y hora para presentación
+      const fecha = new Date(cita.fecha_consulta);
+      const fechaStr = fecha.toLocaleDateString('es-MX');
+      const horaStr = fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+      
+      return {
+        id: cita.id,
+        fecha: fechaStr,
+        hora: horaStr,
+        servicio: cita.servicio_nombre || 'Consulta general',
+        odontologo: cita.odontologo_nombre || 'Por asignar',
+        estado: cita.estado,
+        notas: cita.notas || ''
+      };
+    });
+    
+    return {
+      mensaje: `Encontramos ${citas.length} cita(s) pendiente(s) para ti:`,
+      citas: citasFormateadas,
+      recordatorio: "Recuerda llegar 15 minutos antes de tu cita. Para cancelar o reprogramar, favor de contactarnos con al menos 24 horas de anticipación."
+    };
+    
   } catch (error) {
-    logger.error(`Error al consultar información post-tratamiento específica: ${error.message}`);
-    return { error: "No pudimos obtener la información post-tratamiento específica solicitada" };
+    logger.error(`Error al consultar citas del paciente: ${error.message}`);
+    return { error: "Hubo un problema al consultar tus citas. Por favor, intenta de nuevo más tarde o contáctanos directamente." };
+  }
+}
+
+/**
+ * Consulta información sobre precios generales
+ * @returns {object} - Información sobre precios
+ */
+async function consultarPreciosGenerales() {
+  try {
+    const query = `
+      SELECT category, 
+             MIN(price) as precio_min, 
+             MAX(price) as precio_max,
+             COUNT(*) as total_servicios
+      FROM servicios
+      GROUP BY category
+      ORDER BY category
+    `;
+    
+    const resultados = await executeQuery(query);
+    
+    if (resultados.length === 0) {
+      return { error: "No se encontró información de precios" };
+    }
+    
+    // Formatear en texto amigable
+    let resumen = "Nuestros precios varían según el tratamiento:\n";
+    
+    resultados.forEach(cat => {
+      resumen += `- ${cat.category}: desde $${cat.precio_min} hasta $${cat.precio_max} MXN\n`;
+    });
+    
+    return {
+      precios_texto: resumen,
+      categorias: resultados,
+      metodos_pago: "Aceptamos efectivo, tarjetas de crédito/débito y transferencias bancarias.",
+      promociones: "Consulta nuestras promociones vigentes y descuentos para pacientes frecuentes."
+    };
+    
+  } catch (error) {
+    logger.error(`Error al consultar precios generales: ${error.message}`);
+    return { error: "No pudimos obtener la información sobre precios" };
   }
 }
 
 /**
  * Consulta información legal (términos, deslinde, etc.)
- * @param {object} intencion - Intención detectada
+ * @param {string} tabla - Tabla a consultar
  * @returns {object} - Información legal
  */
-async function consultarInfoLegal(intencion) {
+async function consultarInfoLegal(tabla) {
   try {
-    const tabla = intencion.tabla_consulta;
-    
     // Validar el nombre de la tabla para evitar SQL injection
     const tablasPermitidas = ["inf_deslinde", "inf_terminos_condiciones", "inf_politicas_privacidad"];
     
@@ -721,6 +1096,12 @@ async function consultarInfoLegal(intencion) {
         error: "Documento legal no disponible en la base de datos"
       };
     }
+    
+    // Extraer el tipo de documento del nombre de la tabla
+    let tipoDocumento = "legal";
+    if (tabla === "inf_deslinde") tipoDocumento = "deslinde";
+    else if (tabla === "inf_terminos_condiciones") tipoDocumento = "terminos";
+    else if (tabla === "inf_politicas_privacidad") tipoDocumento = "privacidad";
     
     // Consultar la versión más reciente del documento legal
     const query = `
@@ -752,6 +1133,8 @@ async function consultarInfoLegal(intencion) {
       documento.contenido_resumido = documento.contenido;
     }
     
+    documento.tipo_documento = tipoDocumento;
+    
     return documento;
     
   } catch (error) {
@@ -768,7 +1151,7 @@ async function consultarInfoLegal(intencion) {
  */
 async function consultarRedesSociales() {
   try {
-    const query = "SELECT * FROM inf_redes_sociales WHERE activo = 1 ORDER BY nombre_red";
+    const query = "SELECT * FROM inf_redes_sociales ORDER BY nombre_red";
     const redes = await executeQuery(query);
     
     if (redes.length === 0) {
@@ -794,15 +1177,46 @@ async function consultarRedesSociales() {
 }
 
 /**
- * Consulta tratamientos disponibles
- * @returns {object} - Catálogo de tratamientos
+ * Consulta datos del perfil de la empresa
+ * @returns {object} - Datos de la empresa
+ */
+async function consultarPerfilEmpresa() {
+  try {
+    const query = "SELECT * FROM inf_perfil_empresa LIMIT 1";
+    const resultado = await executeQuery(query);
+    
+    if (resultado.length === 0) {
+      return { error: "No se encontró información del perfil de empresa" };
+    }
+    
+    const empresa = resultado[0];
+    
+    // Formatear dirección completa
+    if (empresa.calle_numero && empresa.localidad) {
+      empresa.direccion_completa = `${empresa.calle_numero}, ${empresa.localidad}, ${empresa.municipio || ''}, ${empresa.estado || ''}${empresa.codigo_postal ? ', C.P. ' + empresa.codigo_postal : ''}`.replace(/,\s+,/g, ',').replace(/,\s+$/g, '');
+    }
+    
+    return empresa;
+    
+  } catch (error) {
+    logger.error(`Error al consultar perfil de empresa: ${error.message}`);
+    return { error: "Error al obtener información de la empresa" };
+  }
+}
+
+/**
+ * Consulta servicios y tratamientos disponibles
+ * @returns {object} - Catálogo de servicios y tratamientos
  */
 async function consultarTratamientos() {
   try {
     const query = `
-      SELECT id, title, description, category, price, duration, image_url
+      SELECT id, title, description, category, price, duration, image_url,
+             CASE 
+               WHEN category IN ('Periodoncia', 'Ortodoncia', 'Cirugía') THEN TRUE
+               ELSE FALSE
+             END as es_tratamiento
       FROM servicios
-      WHERE activo = 1
       ORDER BY category, title
     `;
     
@@ -810,24 +1224,39 @@ async function consultarTratamientos() {
     
     if (servicios.length === 0) {
       return { 
-        error: "No se encontraron tratamientos disponibles en la base de datos"
+        error: "No se encontraron servicios disponibles en la base de datos"
       };
     }
     
     // Agrupar servicios por categoría
     const serviciosPorCategoria = {};
     
+    // Separar tratamientos y servicios normales
+    const tratamientos = [];
+    const serviciosNormales = [];
+    
     servicios.forEach(s => {
       if (!serviciosPorCategoria[s.category]) {
         serviciosPorCategoria[s.category] = [];
       }
       
-      serviciosPorCategoria[s.category].push({
+      const servicioData = {
         id: s.id,
         nombre: s.title,
         duracion: s.duration,
-        descripcion: s.description
-      });
+        precio: s.price,
+        descripcion: s.description,
+        es_tratamiento: s.es_tratamiento === 1
+      };
+      
+      serviciosPorCategoria[s.category].push(servicioData);
+      
+      // Clasificar en tratamiento o servicio normal
+      if (s.es_tratamiento === 1) {
+        tratamientos.push(servicioData);
+      } else {
+        serviciosNormales.push(servicioData);
+      }
     });
     
     // Formatear para mostrar
@@ -844,17 +1273,27 @@ async function consultarTratamientos() {
     // Lista de todos los nombres de servicios (útil para sugerencias)
     const todosServicios = servicios.map(s => s.title);
     
+    // Lista específica de tratamientos
+    const nombresTratamientos = tratamientos.map(t => t.nombre);
+    
+    // Lista específica de servicios normales
+    const nombresServicios = serviciosNormales.map(s => s.nombre);
+    
     return { 
       servicios: listaServicios,
       serviciosPorCategoria: serviciosPorCategoria,
       lista_servicios: todosServicios,
-      total_servicios: servicios.length
+      tratamientos: nombresTratamientos,
+      servicios_normales: nombresServicios,
+      total_servicios: servicios.length,
+      total_tratamientos: tratamientos.length,
+      total_servicios_normales: serviciosNormales.length
     };
     
   } catch (error) {
-    logger.error(`Error al consultar tratamientos: ${error.message}`);
+    logger.error(`Error al consultar servicios y tratamientos: ${error.message}`);
     return { 
-      error: "Error en la consulta a la base de datos para obtener tratamientos"
+      error: "Error en la consulta a la base de datos para obtener servicios y tratamientos"
     };
   }
 }
@@ -872,14 +1311,18 @@ async function consultarTratamiento(nombreTratamiento) {
     
     // Consulta principal para encontrar el tratamiento
     const query = `
-      SELECT s.id, s.title, s.description, s.duration, s.category, s.image_url,
-             s.tratamiento
+      SELECT s.id, s.title, s.description, s.duration, s.category, s.price, s.image_url,
+             CASE 
+               WHEN s.category IN ('Periodoncia', 'Ortodoncia', 'Cirugía') THEN TRUE
+               ELSE FALSE
+             END as es_tratamiento
       FROM servicios s
-      WHERE s.title LIKE ? OR s.description LIKE ?
+      WHERE s.title LIKE ? OR s.description LIKE ? OR s.title LIKE ? OR s.description LIKE ?
       ORDER BY CASE 
-               WHEN s.title LIKE ? THEN 0 
+               WHEN s.title = ? THEN 0 
                WHEN s.title LIKE ? THEN 1
-               ELSE 2 
+               WHEN s.title LIKE ? THEN 2
+               ELSE 3 
                END,
                LENGTH(s.title) ASC
       LIMIT 1
@@ -891,16 +1334,75 @@ async function consultarTratamiento(nombreTratamiento) {
       [
         nombreTratamiento, 
         `%${nombreTratamiento}%`,
+        `%${nombreTratamiento}`,
+        `${nombreTratamiento}%`,
         nombreTratamiento,
-        `%${nombreTratamiento}%`
+        `${nombreTratamiento}%`,
+        `%${nombreTratamiento}`
       ]
     );
     
     if (servicios.length === 0) {
-      // Si no encuentra el tratamiento, obtener lista de tratamientos disponibles
+      // Si no encuentra el tratamiento, realizar una búsqueda más flexible por palabras clave
+      const palabrasClaves = nombreTratamiento.split(/\s+/).filter(p => p.length > 3);
+      
+      if (palabrasClaves.length > 0) {
+        let queryPalabras = `
+          SELECT s.id, s.title, s.description, s.duration, s.category, s.price, s.image_url,
+                 CASE 
+                   WHEN s.category IN ('Periodoncia', 'Ortodoncia', 'Cirugía') THEN TRUE
+                   ELSE FALSE
+                 END as es_tratamiento,
+                 COUNT(*) as coincidencias
+          FROM servicios s
+          WHERE 1=0`;
+        
+        // Agregar cada palabra clave a la búsqueda
+        palabrasClaves.forEach(palabra => {
+          queryPalabras += ` OR s.title LIKE '%${palabra}%' OR s.description LIKE '%${palabra}%'`;
+        });
+        
+        queryPalabras += ` 
+          GROUP BY s.id
+          ORDER BY coincidencias DESC, s.title
+          LIMIT 1
+        `;
+        
+        const serviciosPorPalabras = await executeQuery(queryPalabras);
+        
+        if (serviciosPorPalabras.length > 0) {
+          const servicio = serviciosPorPalabras[0];
+          
+          // Consultar detalles adicionales
+          const queryDetalles = `
+            SELECT * FROM servicio_detalles
+            WHERE servicio_id = ?
+          `;
+          
+          const detalles = await executeQuery(queryDetalles, [servicio.id]);
+          
+          // Asignar campos para facilitar el uso con plantillas
+          return {
+            id: servicio.id,
+            servicio: servicio.title,
+            nombre: servicio.title,
+            duracion: servicio.duration || "Consultar",
+            precio: servicio.price || "Consultar",
+            categoria: servicio.category,
+            descripcion: servicio.description,
+            es_tratamiento: servicio.es_tratamiento === 1, // Usando bandera específica de tratamiento
+            detalles: detalles,
+            beneficios: obtenerDetallesPorTipo(detalles, 'beneficio'),
+            incluye: obtenerDetallesPorTipo(detalles, 'incluye'),
+            precauciones: obtenerDetallesPorTipo(detalles, 'precaucion')
+          };
+        }
+      }
+      
+      // Si aún no encuentra, obtener lista de tratamientos disponibles para sugerir
       const todosTratamientos = await consultarTratamientos();
       
-      let sugerencias = "No hay tratamientos similares disponibles.";
+      let sugerencias = "No hay servicios similares disponibles.";
       
       if (!todosTratamientos.error && todosTratamientos.lista_servicios?.length > 0) {
         // Obtener hasta 5 tratamientos para sugerir
@@ -908,7 +1410,7 @@ async function consultarTratamiento(nombreTratamiento) {
       }
       
       return { 
-        error: `No se encontró el tratamiento "${nombreTratamiento}" en la base de datos`,
+        error: `No se encontró el servicio "${nombreTratamiento}" en nuestro catálogo`,
         sugerencias: sugerencias
       };
     }
@@ -929,9 +1431,10 @@ async function consultarTratamiento(nombreTratamiento) {
       servicio: servicio.title,
       nombre: servicio.title,
       duracion: servicio.duration || "Consultar",
+      precio: servicio.price || "Consultar",
       categoria: servicio.category,
       descripcion: servicio.description,
-      tratamiento: servicio.tratamiento || servicio.title,
+      es_tratamiento: servicio.es_tratamiento === 1, // Usando bandera específica de tratamiento
       detalles: detalles,
       beneficios: obtenerDetallesPorTipo(detalles, 'beneficio'),
       incluye: obtenerDetallesPorTipo(detalles, 'incluye'),
@@ -941,7 +1444,7 @@ async function consultarTratamiento(nombreTratamiento) {
   } catch (error) {
     logger.error(`Error al consultar tratamiento: ${error.stack}`);
     return { 
-      error: "Error en la consulta a la base de datos para obtener detalles del tratamiento"
+      error: "Error en la consulta a la base de datos para obtener detalles del servicio"
     };
   }
 }
@@ -982,7 +1485,8 @@ async function consultaGenerica(tabla, campo, condicion) {
       'chatbot', 'horarios', 'inf_deslinde', 
       'inf_perfil_empresa', 'inf_politicas_privacidad', 
       'inf_redes_sociales', 'inf_terminos_condiciones',
-      'preguntas_frecuentes', 'servicios', 'servicio_detalles'
+      'preguntas_frecuentes', 'servicios', 'servicio_detalles',
+      'acerca_de', 'citas'
     ];
     
     // Validar el nombre de la tabla para evitar SQL injection
@@ -1109,7 +1613,8 @@ function obtieneAlternativasVariable(variable) {
     'telefono': ['telefono_principal', 'contacto', 'celular'],
     'descripcion': ['description', 'contenido', 'detalle'],
     'categoria': ['category', 'tipo'],
-    'contenido': ['descripcion', 'description', 'texto']
+    'contenido': ['descripcion', 'description', 'texto'],
+    'precio': ['price', 'costo', 'valor']
   };
   
   return alternativas[variable] || [];
@@ -1141,6 +1646,10 @@ function obtenerValorPredeterminado(variable, datos) {
     case 'contenido':
       return "";
       
+    case 'precio':
+    case 'price':
+      return "consultar en clínica";
+      
     default:
       return "";
   }
@@ -1160,42 +1669,8 @@ router.get("/preguntas-frecuentes", async (req, res) => {
     
     const preguntas = await executeQuery(query);
     
-    // Si no hay preguntas frecuentes, proporcionar algunas por defecto
-    if (preguntas.length === 0) {
-      const preguntasPorDefecto = [
-        { 
-          id: 1, 
-          pregunta: "¿Cuáles son sus horarios de atención?", 
-          respuesta: "Nuestro horario es de lunes a viernes de 9:00 a 19:00 horas y sábados de 9:00 a 14:00 horas." 
-        },
-        { 
-          id: 2, 
-          pregunta: "¿Cómo puedo agendar una cita?", 
-          respuesta: "Puedes agendar una cita a través de nuestra página web o directamente en la clínica." 
-        },
-        { 
-          id: 3, 
-          pregunta: "¿Qué debo llevar a mi primera consulta?", 
-          respuesta: "Para tu primera consulta, te recomendamos llevar una identificación y, si tienes, información sobre tu historial médico." 
-        },
-        { 
-          id: 4, 
-          pregunta: "¿Cómo puedo cancelar una cita?", 
-          respuesta: "Para cancelaciones, te pedimos avisar con al menos 24 horas de anticipación a través de nuestra página web o llamando a la clínica." 
-        },
-        { 
-          id: 5, 
-          pregunta: "¿Atienden urgencias dentales?", 
-          respuesta: "Sí, contamos con atención de urgencias. Te recomendamos llamar previamente para confirmar la disponibilidad." 
-        }
-      ];
-      
-      return res.json({ 
-        preguntas: preguntasPorDefecto,
-        total: preguntasPorDefecto.length 
-      });
-    }
-    
+    // Retornar las preguntas encontradas de la base de datos, sin proporcionar valores por defecto
+    // ya que todo debe ser dinámico
     return res.json({ 
       preguntas,
       total: preguntas.length 
@@ -1204,29 +1679,11 @@ router.get("/preguntas-frecuentes", async (req, res) => {
   } catch (error) {
     logger.error(`Error al obtener preguntas frecuentes: ${error.message}`);
     
-    // Proporcionar preguntas por defecto en caso de error
-    const preguntasPorDefecto = [
-      { 
-        id: 1, 
-        pregunta: "¿Cuáles son sus horarios de atención?", 
-        respuesta: "Nuestro horario es de lunes a viernes de 9:00 a 19:00 horas y sábados de 9:00 a 14:00 horas." 
-      },
-      { 
-        id: 2, 
-        pregunta: "¿Cómo puedo agendar una cita?", 
-        respuesta: "Puedes agendar una cita a través de nuestra página web o directamente en la clínica." 
-      },
-      { 
-        id: 3, 
-        pregunta: "¿Qué debo llevar a mi primera consulta?", 
-        respuesta: "Para tu primera consulta, te recomendamos llevar una identificación y, si tienes, información sobre tu historial médico." 
-      }
-    ];
-    
-    return res.json({ 
-      preguntas: preguntasPorDefecto,
-      total: preguntasPorDefecto.length,
-      error: "Error al obtener preguntas frecuentes - mostrando valores predeterminados"
+    // Retornar un error sin proporcionar valores por defecto
+    return res.status(500).json({ 
+      error: "Error al obtener preguntas frecuentes de la base de datos",
+      preguntas: [],
+      total: 0
     });
   }
 });
@@ -1240,7 +1697,7 @@ router.get("/patrones", async (req, res) => {
     const { categoria } = req.query;
     
     let query = `
-      SELECT id, patron, categoria, prioridad 
+      SELECT id, patron, categoria, respuesta, prioridad 
       FROM chatbot
     `;
     
@@ -1329,9 +1786,9 @@ router.get("/tratamientos", async (req, res) => {
 async function consultarTratamientosPorCategoria(categoria) {
   try {
     const query = `
-      SELECT id, title, description, category, duration, image_url
+      SELECT id, title, description, category, duration, price, image_url
       FROM servicios
-      WHERE category = ? AND activo = 1
+      WHERE category = ?
       ORDER BY title
     `;
     
@@ -1368,13 +1825,19 @@ async function consultarTratamientosPorCategoria(categoria) {
  */
 router.get("/tratamiento", async (req, res) => {
   try {
-    const { nombre } = req.query;
+    const { nombre, id } = req.query;
     
-    if (!nombre) {
-      return res.status(400).json({ error: "Debe especificar el nombre del tratamiento" });
+    if (!nombre && !id) {
+      return res.status(400).json({ error: "Debe especificar el nombre o ID del tratamiento" });
     }
     
-    const datos = await consultarTratamiento(nombre);
+    let datos;
+    
+    if (id) {
+      datos = await consultarTratamientoPorId(id);
+    } else {
+      datos = await consultarTratamiento(nombre);
+    }
     
     if (datos.error) {
       return res.status(404).json(datos);
@@ -1389,6 +1852,61 @@ router.get("/tratamiento", async (req, res) => {
     });
   }
 });
+
+/**
+ * Consulta tratamiento por ID
+ * @param {number} id - ID del tratamiento
+ * @returns {object} - Datos del tratamiento
+ */
+async function consultarTratamientoPorId(id) {
+  try {
+    const query = `
+      SELECT s.id, s.title, s.description, s.duration, s.category, s.price, s.image_url
+      FROM servicios s
+      WHERE s.id = ?
+      LIMIT 1
+    `;
+    
+    const servicios = await executeQuery(query, [id]);
+    
+    if (servicios.length === 0) {
+      return { 
+        error: `No se encontró el tratamiento con ID ${id} en la base de datos`
+      };
+    }
+    
+    const servicio = servicios[0];
+    
+    // Consultar detalles adicionales
+    const queryDetalles = `
+      SELECT * FROM servicio_detalles
+      WHERE servicio_id = ?
+    `;
+    
+    const detalles = await executeQuery(queryDetalles, [servicio.id]);
+    
+    // Asignar campos para facilitar el uso con plantillas
+    return {
+      id: servicio.id,
+      servicio: servicio.title,
+      nombre: servicio.title,
+      duracion: servicio.duration || "Consultar",
+      precio: servicio.price || "Consultar",
+      categoria: servicio.category,
+      descripcion: servicio.description,
+      detalles: detalles,
+      beneficios: obtenerDetallesPorTipo(detalles, 'beneficio'),
+      incluye: obtenerDetallesPorTipo(detalles, 'incluye'),
+      precauciones: obtenerDetallesPorTipo(detalles, 'precaucion')
+    };
+    
+  } catch (error) {
+    logger.error(`Error al consultar tratamiento por ID: ${error.stack}`);
+    return { 
+      error: "Error en la consulta a la base de datos para obtener detalles del tratamiento"
+    };
+  }
+}
 
 /**
  * Endpoint para obtener horarios
@@ -1515,28 +2033,65 @@ async function consultarHorarioPorDia(dia) {
  */
 router.get("/perfil-empresa", async (req, res) => {
   try {
-    const query = "SELECT * FROM inf_perfil_empresa LIMIT 1";
-    const resultado = await executeQuery(query);
+    const datos = await consultarPerfilEmpresa();
     
-    if (resultado.length === 0) {
-      return res.status(404).json({ 
-        error: "No se encontró información del perfil de empresa en la base de datos"
-      });
+    if (datos.error) {
+      return res.status(404).json(datos);
     }
     
-    const empresa = resultado[0];
-    
-    // Formatear dirección completa
-    if (empresa.calle_numero && empresa.localidad) {
-      empresa.direccion_completa = `${empresa.calle_numero}, ${empresa.localidad}, ${empresa.municipio || ''}, ${empresa.estado || ''}${empresa.codigo_postal ? ', C.P. ' + empresa.codigo_postal : ''}`.replace(/,\s+,/g, ',').replace(/,\s+$/g, '');
-    }
-    
-    return res.json(empresa);
+    return res.json(datos);
     
   } catch (error) {
     logger.error(`Error al obtener perfil de empresa: ${error.message}`);
     return res.status(500).json({
       error: "Error en la consulta a la base de datos para obtener perfil de empresa"
+    });
+  }
+});
+
+/**
+ * Endpoint para obtener información "Acerca de"
+ */
+router.get("/acerca-de", async (req, res) => {
+  try {
+    const { tipo } = req.query;
+    let datos;
+    
+    if (tipo) {
+      datos = await consultarAcercaDe(tipo);
+    } else {
+      // Obtener todos los tipos
+      const query = "SELECT * FROM acerca_de ORDER BY tipo";
+      const resultados = await executeQuery(query);
+      
+      if (resultados.length === 0) {
+        return res.status(404).json({ 
+          error: "No se encontró información institucional"
+        });
+      }
+      
+      // Agrupar por tipo
+      const agrupados = {};
+      resultados.forEach(item => {
+        agrupados[item.tipo] = item;
+      });
+      
+      datos = { 
+        tipos: Object.keys(agrupados),
+        datos: agrupados
+      };
+    }
+    
+    if (datos.error) {
+      return res.status(404).json(datos);
+    }
+    
+    return res.json(datos);
+    
+  } catch (error) {
+    logger.error(`Error al obtener información "acerca de": ${error.message}`);
+    return res.status(500).json({
+      error: "Error en la consulta a la base de datos para obtener información institucional"
     });
   }
 });
@@ -1592,27 +2147,39 @@ router.get("/legal/:tipo", async (req, res) => {
         });
     }
     
-    const query = `
-      SELECT * FROM ${tabla}
-      WHERE estado = 'activo'
-      ORDER BY version DESC, fecha_actualizacion DESC
-      LIMIT 1
-    `;
+    const datos = await consultarInfoLegal(tabla);
     
-    const resultado = await executeQuery(query);
-    
-    if (resultado.length === 0) {
-      return res.status(404).json({ 
-        error: `No se encontró el documento legal de tipo '${tipo}' en la base de datos`
-      });
+    if (datos.error) {
+      return res.status(404).json(datos);
     }
     
-    return res.json(resultado[0]);
+    return res.json(datos);
     
   } catch (error) {
     logger.error(`Error al obtener documento legal: ${error.message}`);
     return res.status(500).json({ 
       error: "Error en la consulta a la base de datos para obtener documentos legales"
+    });
+  }
+});
+
+/**
+ * Endpoint para obtener información de citas
+ */
+router.get("/citas", async (req, res) => {
+  try {
+    const datos = await consultarInfoCitas();
+    
+    if (datos.error) {
+      return res.status(404).json(datos);
+    }
+    
+    return res.json(datos);
+    
+  } catch (error) {
+    logger.error(`Error al obtener información de citas: ${error.message}`);
+    return res.status(500).json({ 
+      error: "Error en la consulta a la base de datos para obtener información de citas"
     });
   }
 });
