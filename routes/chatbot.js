@@ -2118,6 +2118,230 @@ router.get("/redes-sociales", async (req, res) => {
 });
 
 /**
+ * Endpoint de diagnóstico para verificar conexión con la base de datos
+ */
+router.get("/diagnostico", async (req, res) => {
+    try {
+      // 1. Verificar tablas principales
+      const tablasVerificar = [
+        'chatbot', 'acerca_de', 'servicios', 'horarios', 
+        'inf_perfil_empresa', 'preguntas_frecuentes'
+      ];
+      
+      const resultadosTablas = {};
+      
+      for (const tabla of tablasVerificar) {
+        try {
+          // Verificar existencia de la tabla
+          const existeQuery = `
+            SELECT COUNT(*) as existe
+            FROM information_schema.tables
+            WHERE table_schema = DATABASE() AND table_name = ?
+          `;
+          
+          const existeResultado = await executeQuery(existeQuery, [tabla]);
+          const existe = existeResultado[0].existe > 0;
+          
+          // Contar registros si la tabla existe
+          let conteo = 0;
+          if (existe) {
+            const conteoQuery = `SELECT COUNT(*) as total FROM ${tabla}`;
+            const conteoResultado = await executeQuery(conteoQuery);
+            conteo = conteoResultado[0].total;
+          }
+          
+          resultadosTablas[tabla] = { existe, registros: conteo };
+        } catch (error) {
+          resultadosTablas[tabla] = { 
+            existe: false, 
+            error: error.message,
+            registros: 0
+          };
+        }
+      }
+      
+      // 2. Verificar patrones de saludo específicamente
+      let patronesSaludo = [];
+      try {
+        const saludosQuery = `
+          SELECT id, patron, LEFT(respuesta, 100) as respuesta_preview, prioridad
+          FROM chatbot 
+          WHERE categoria = 'General' AND
+                (patron = 'hola' OR patron LIKE '%salud%' OR patron LIKE '%buenos%')
+          ORDER BY prioridad DESC
+        `;
+        patronesSaludo = await executeQuery(saludosQuery);
+      } catch (error) {
+        patronesSaludo = { error: error.message };
+      }
+      
+      // 3. Verificar función extraerEntidades
+      let testEntidades = null;
+      try {
+        const mensajePrueba = "Hola, quiero información sobre limpieza dental y horarios";
+        testEntidades = extraerEntidades(mensajePrueba);
+      } catch (error) {
+        testEntidades = { error: error.message };
+      }
+      
+      // 4. Probar la función consultarAcercaDe
+      let testMision = null;
+      try {
+        testMision = await consultarAcercaDe("Misión");
+      } catch (error) {
+        testMision = { error: error.message };
+      }
+      
+      // 5. Probar la función buscarIntencion
+      let testIntencion = null;
+      try {
+        testIntencion = await buscarIntencion("hola");
+      } catch (error) {
+        testIntencion = { error: error.message };
+      }
+      
+      // Devolver resultados
+      return res.json({
+        estado: "success",
+        mensaje: "Diagnóstico completado",
+        tablas: resultadosTablas,
+        patronesSaludo,
+        testEntidades,
+        testMision,
+        testIntencion,
+        timestamp: new Date().toISOString()
+      });
+      
+    } catch (error) {
+      logger.error(`Error en diagnóstico: ${error.stack}`);
+      return res.status(500).json({ 
+        error: "Error al realizar diagnóstico",
+        mensaje: error.message,
+        stack: error.stack
+      });
+    }
+  });
+  
+  /**
+   * Actualiza la función consultarAcercaDe con mejor manejo de errores
+   */
+  async function consultarAcercaDe(tipo) {
+    try {
+      // Primero verificamos la existencia de la tabla
+      const verificarTablaQuery = `
+        SELECT COUNT(*) as existe
+        FROM information_schema.tables
+        WHERE table_schema = DATABASE() 
+        AND table_name = 'acerca_de'
+      `;
+      
+      const tablaExiste = await executeQuery(verificarTablaQuery);
+      
+      if (!tablaExiste[0].existe) {
+        logger.error(`La tabla acerca_de no existe en la base de datos`);
+        return { 
+          error: "La tabla de información institucional no está disponible",
+          tipo: tipo,
+          solucion: "Contacte al administrador del sistema"
+        };
+      }
+      
+      // Ahora verificamos la estructura de la tabla
+      const columnas = await executeQuery(`SHOW COLUMNS FROM acerca_de`);
+      const tieneColumnasTipoDescripcion = columnas.some(col => col.Field === 'tipo') &&
+                                          columnas.some(col => col.Field === 'descripcion');
+      
+      if (!tieneColumnasTipoDescripcion) {
+        logger.error(`La tabla acerca_de no tiene las columnas requeridas (tipo, descripcion)`);
+        return { 
+          error: "La estructura de la tabla es incorrecta", 
+          tipo: tipo,
+          columnas_disponibles: columnas.map(c => c.Field).join(', ')
+        };
+      }
+      
+      // Realizar la consulta
+      const query = `
+        SELECT * FROM acerca_de
+        WHERE tipo = ?
+        LIMIT 1
+      `;
+      
+      const resultado = await executeQuery(query, [tipo]);
+      
+      if (resultado.length === 0) {
+        logger.info(`No se encontró información de tipo "${tipo}" en acerca_de`);
+        return { 
+          error: `No se encontró información sobre ${tipo.toLowerCase()}`,
+          tipo: tipo,
+          sugerencia: "Verifique la existencia del registro en la tabla acerca_de"
+        };
+      }
+      
+      return resultado[0];
+      
+    } catch (error) {
+      logger.error(`Error detallado al consultar acerca_de: ${error.stack}`);
+      return { 
+        error: "Error al obtener la información institucional",
+        detalle: error.message,
+        tipo: tipo
+      };
+    }
+  }
+  
+  /**
+   * Función mejorada para normalizar el texto, evitando errores comunes
+   */
+  function normalizarTexto(texto) {
+    if (!texto) return "";
+    
+    try {
+      // Normalización más robusta
+      return texto.toLowerCase()
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "") // Eliminar acentos
+        .replace(/[^\w\s]/gi, " ")       // Reemplazar caracteres especiales por espacios
+        .replace(/\s+/g, " ")            // Eliminar espacios múltiples
+        .trim();
+    } catch (error) {
+      logger.error(`Error al normalizar texto: ${error.message}`);
+      // En caso de error, intentar simplemente con toLowerCase
+      return String(texto).toLowerCase().trim();
+    }
+  }
+  
+  /**
+   * Función mejorada para seleccionar respuesta aleatoria
+   * con mejor manejo de errores
+   */
+  function seleccionarRespuestaAleatoria(respuestasStr) {
+    try {
+      if (!respuestasStr) {
+        logger.warn("Se intentó seleccionar una respuesta de un string vacío");
+        return "Lo siento, no tengo una respuesta para eso.";
+      }
+      
+      // Las respuestas están separadas por |||
+      const respuestas = respuestasStr.split('|||')
+        .map(r => r.trim())
+        .filter(r => r);
+      
+      if (respuestas.length === 0) {
+        logger.warn("No se encontraron respuestas válidas en el string");
+        return "Lo siento, no tengo una respuesta para eso.";
+      }
+      
+      // Seleccionar una aleatoriamente
+      const indice = Math.floor(Math.random() * respuestas.length);
+      return respuestas[indice];
+    } catch (error) {
+      logger.error(`Error al seleccionar respuesta aleatoria: ${error.message}`);
+      return "Lo siento, ocurrió un error al procesar la respuesta.";
+    }
+  }
+
+/**
  * Endpoint para obtener documentos legales
  */
 router.get("/legal/:tipo", async (req, res) => {
