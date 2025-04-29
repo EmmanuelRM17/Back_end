@@ -3,10 +3,7 @@ const router = express.Router();
 const db = require("../db");
 const logger = require("../utils/logger");
 
-/**
- * Función para ejecutar consultas a la base de datos como Promesas
- * Facilita el trabajo con async/await en las consultas
- */
+// Función para ejecutar consultas a la base de datos como Promesas
 const executeQuery = (query, params = []) => {
   return new Promise((resolve, reject) => {
     db.query(query, params, (err, results) => {
@@ -22,10 +19,7 @@ const executeQuery = (query, params = []) => {
   });
 };
 
-/**
- * Endpoint principal para procesar mensajes del chatbot
- * Detecta intenciones y devuelve respuestas dinámicas basadas en el contexto
- */
+// Endpoint principal para procesar mensajes del chatbot
 router.post("/mensaje", async (req, res) => {
   try {
     const { mensaje, contexto = {} } = req.body;
@@ -43,7 +37,6 @@ router.post("/mensaje", async (req, res) => {
     logger.info(`Mensaje procesado: "${mensaje.substring(0, 50)}..." - Tipo: ${respuesta.tipo}`);
     
     // Verificar si necesitamos mantener contexto para la siguiente interacción
-    // Por ejemplo, si estamos en medio de una consulta de citas
     const nuevoContexto = respuesta.contexto || {};
     
     return res.json({
@@ -61,12 +54,7 @@ router.post("/mensaje", async (req, res) => {
   }
 });
 
-/**
- * Procesa el mensaje del usuario y genera una respuesta apropiada
- * @param {string} mensaje - Texto del mensaje del usuario
- * @param {object} contexto - Contexto opcional de la conversación
- * @returns {object} - Respuesta estructurada para el usuario
- */
+// Procesa el mensaje del usuario y genera una respuesta apropiada
 async function procesarMensaje(mensaje, contexto = {}) {
   try {
     // Normalizar el mensaje (minúsculas, quitar caracteres especiales, etc.)
@@ -244,11 +232,7 @@ async function procesarMensaje(mensaje, contexto = {}) {
   }
 }
 
-/**
- * Busca una pregunta frecuente que coincida con el mensaje
- * @param {string} mensaje - Mensaje normalizado del usuario
- * @returns {object|null} - Pregunta frecuente encontrada o null
- */
+// Busca una pregunta frecuente que coincida con el mensaje
 async function buscarPreguntaFrecuente(mensaje) {
   try {
     // Consulta para buscar preguntas similares
@@ -258,7 +242,6 @@ async function buscarPreguntaFrecuente(mensaje) {
       WHERE 
         estado = 'registrado' AND
         (
-          MATCH(pregunta) AGAINST(? IN BOOLEAN MODE) OR
           pregunta LIKE ? OR
           ? LIKE CONCAT('%', pregunta, '%')
         )
@@ -272,11 +255,9 @@ async function buscarPreguntaFrecuente(mensaje) {
       LIMIT 1
     `;
     
-    const palabrasClave = mensaje.split(' ').filter(p => p.length > 3).join(' ');
     const resultados = await executeQuery(
       query, 
       [
-        palabrasClave, 
         `%${mensaje}%`,
         mensaje,
         `%${mensaje}%`,
@@ -295,28 +276,24 @@ async function buscarPreguntaFrecuente(mensaje) {
   }
 }
 
-/**
- * Normaliza el texto del mensaje para facilitar el procesamiento
- * @param {string} texto - Texto a normalizar
- * @returns {string} - Texto normalizado
- */
+// Normaliza el texto del mensaje para facilitar el procesamiento
 function normalizarTexto(texto) {
   if (!texto) return "";
   
-  return texto.toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "") // Eliminar acentos
-    .replace(/[^\w\s]/gi, " ")       // Reemplazar caracteres especiales por espacios
-    .replace(/\s+/g, " ")            // Eliminar espacios múltiples
-    .trim();
+  try {
+    return texto.toLowerCase()
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "") // Eliminar acentos
+      .replace(/[^\w\s]/gi, " ")       // Reemplazar caracteres especiales por espacios
+      .replace(/\s+/g, " ")            // Eliminar espacios múltiples
+      .trim();
+  } catch (error) {
+    logger.error(`Error al normalizar texto: ${error.message}`);
+    return String(texto).toLowerCase().trim();
+  }
 }
 
-/**
- * Extrae entidades relevantes del mensaje del usuario
- * (tratamientos, horarios, etc.)
- * @param {string} mensaje - Mensaje normalizado
- * @returns {object} - Objeto con las entidades encontradas
- */
+// Extrae entidades relevantes del mensaje del usuario
 function extraerEntidades(mensaje) {
   const entidades = {
     tratamientos: [],
@@ -372,17 +349,10 @@ function extraerEntidades(mensaje) {
   const palabrasEmpresa = ['empresa', 'clinica', 'historia', 'mision', 'vision', 'valores', 'quienes son', 'acerca'];
   entidades.empresa = palabrasEmpresa.some(palabra => mensaje.includes(palabra));
   
-  // Buscar tratamientos dentales mencionados
-  entidades.tratamientos = extraerTratamientos(mensaje);
-  
   return entidades;
 }
 
-/**
- * Extrae nombres de tratamientos dentales del mensaje
- * @param {string} mensaje - Mensaje del usuario normalizado
- * @returns {array} - Array con los tratamientos encontrados
- */
+// Extrae nombres de tratamientos dentales del mensaje
 async function extraerTratamientos(mensaje) {
   try {
     // Primero, obtenemos todos los servicios de la base de datos
@@ -473,12 +443,7 @@ async function extraerTratamientos(mensaje) {
   }
 }
 
-/**
- * Busca una intención que coincida con el mensaje del usuario
- * Implementa un algoritmo de coincidencia mejorado
- * @param {string} mensaje - Mensaje normalizado del usuario
- * @returns {object|null} - Intención encontrada o null
- */
+// Busca una intención que coincida con el mensaje del usuario
 async function buscarIntencion(mensaje) {
   try {
     // 1. Primero, intentar con coincidencias exactas de patrones completos
@@ -530,28 +495,32 @@ async function buscarIntencion(mensaje) {
       return intencionesInversas[0];
     }
     
-    // 4. Búsqueda por palabras clave individuales del patrón
+    // 4. Búsqueda optimizada por palabras clave del mensaje
     const queryPalabras = `
-      SELECT c.*,
-             COUNT(*) as coincidencias
-      FROM chatbot c, 
-           (SELECT DISTINCT palabra FROM (
-             SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(?, ' ', n), ' ', -1) AS palabra
-             FROM (
-               SELECT 1 as n UNION SELECT 2 UNION SELECT 3 UNION SELECT 4 UNION SELECT 5
-               UNION SELECT 6 UNION SELECT 7 UNION SELECT 8 UNION SELECT 9 UNION SELECT 10
-             ) numbers
-             WHERE n <= 1 + LENGTH(?) - LENGTH(REPLACE(?, ' ', ''))
-           ) palabras_mensaje
-           WHERE LENGTH(palabra) > 3
-          ) p
-      WHERE CONCAT(' ', c.patron, ' ') LIKE CONCAT('% ', p.palabra, ' %')
+      SELECT c.*, COUNT(*) as coincidencias
+      FROM chatbot c
+      JOIN (
+        SELECT DISTINCT palabra
+        FROM (
+          SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(?, ' ', n.digit+1), ' ', -1) AS palabra
+          FROM (
+            SELECT 0 as digit UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL 
+            SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL 
+            SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
+          ) n
+          WHERE n.digit < LENGTH(?) - LENGTH(REPLACE(?, ' ', '')) + 1
+          AND LENGTH(SUBSTRING_INDEX(SUBSTRING_INDEX(?, ' ', n.digit+1), ' ', -1)) > 3
+        ) palabras
+      ) p ON CONCAT(' ', c.patron, ' ') LIKE CONCAT('% ', p.palabra, ' %')
       GROUP BY c.id
       ORDER BY coincidencias DESC, c.prioridad DESC
       LIMIT 1
     `;
     
-    const intencionesPalabras = await executeQuery(queryPalabras, [mensaje, mensaje, mensaje]);
+    const intencionesPalabras = await executeQuery(
+      queryPalabras, 
+      [mensaje, mensaje, mensaje, mensaje]
+    );
     
     if (intencionesPalabras.length > 0 && intencionesPalabras[0].coincidencias >= 2) {
       logger.debug(`Intención encontrada (coincidencia palabras): ${intencionesPalabras[0].patron}`);
@@ -562,7 +531,7 @@ async function buscarIntencion(mensaje) {
     const entidades = extraerEntidades(mensaje);
     let categoria = null;
     
-    if (entidades.tratamientos.length > 0) categoria = 'Servicios';
+    if (entidades.tratamientos && entidades.tratamientos.length > 0) categoria = 'Servicios';
     else if (entidades.horarios) categoria = 'Horario';
     else if (entidades.contacto) categoria = 'Contacto';
     else if (entidades.citas) categoria = 'Citas';
@@ -597,21 +566,15 @@ async function buscarIntencion(mensaje) {
   }
 }
 
-/**
- * Genera una respuesta basada en la intención detectada y las entidades
- * @param {object} intencion - Intención detectada
- * @param {string} mensaje - Mensaje original normalizado
- * @param {object} entidades - Entidades extraídas del mensaje
- * @param {object} contexto - Contexto de la conversación
- * @returns {object} - Respuesta estructurada
- */
+// Genera una respuesta basada en la intención detectada y las entidades
 async function generarRespuesta(intencion, mensaje, entidades, contexto = {}) {
   try {
     // 1. Verificar si la intención requiere una consulta a la base de datos
     let datosConsulta = null;
     
     // Si hay tratamientos específicos mencionados, priorizarlos en la consulta
-    const hayTratamientoEspecifico = entidades.tratamientos.length > 0 && 
+    const hayTratamientoEspecifico = entidades.tratamientos && 
+                                    entidades.tratamientos.length > 0 && 
                                     intencion.categoria === 'Servicios';
     
     if (hayTratamientoEspecifico) {
@@ -629,7 +592,7 @@ async function generarRespuesta(intencion, mensaje, entidades, contexto = {}) {
     }
     
     // 2. Obtener una respuesta aleatoria de las disponibles
-    const respuesta = seleccionarRespuestaAleatoria(intencion.respuesta);
+    const respuesta = seleccionarRespuestaAleatoria(intencion.respuestas || intencion.respuesta);
     
     // 3. Si hay datos de consulta y la respuesta es una plantilla, reemplazar variables
     let respuestaFinal = respuesta;
@@ -675,12 +638,7 @@ async function generarRespuesta(intencion, mensaje, entidades, contexto = {}) {
   }
 }
 
-/**
- * Verifica si existe un valor por defecto para una variable
- * @param {object} datos - Datos disponibles
- * @param {string} variable - Nombre de la variable
- * @returns {boolean} - True si hay un valor o alternativa
- */
+// Verifica si existe un valor por defecto para una variable
 function tieneValorPorDefecto(datos, variable) {
   // Mapeo de variables a posibles alternativas
   const alternativas = {
@@ -703,13 +661,7 @@ function tieneValorPorDefecto(datos, variable) {
   return false;
 }
 
-/**
- * Realiza una consulta según la categoría de la intención
- * @param {object} intencion - Intención detectada
- * @param {string} mensaje - Mensaje normalizado
- * @param {object} entidades - Entidades detectadas
- * @returns {object} - Datos de la consulta
- */
+// Realiza una consulta según la categoría de la intención
 async function realizarConsultaSegunCategoria(intencion, mensaje, entidades) {
   try {
     switch (intencion.categoria) {
@@ -720,7 +672,7 @@ async function realizarConsultaSegunCategoria(intencion, mensaje, entidades) {
         return await consultarContacto();
       
       case 'Servicios':
-        if (entidades.tratamientos.length > 0) {
+        if (entidades.tratamientos && entidades.tratamientos.length > 0) {
           return await consultarTratamiento(entidades.tratamientos[0]);
         } else {
           return await consultarTratamientos();
@@ -730,7 +682,7 @@ async function realizarConsultaSegunCategoria(intencion, mensaje, entidades) {
         return await consultarInfoCitas();
       
       case 'Precios':
-        if (entidades.tratamientos.length > 0) {
+        if (entidades.tratamientos && entidades.tratamientos.length > 0) {
           const infoTratamiento = await consultarTratamiento(entidades.tratamientos[0]);
           if (infoTratamiento) {
             return {
@@ -785,11 +737,7 @@ async function realizarConsultaSegunCategoria(intencion, mensaje, entidades) {
   }
 }
 
-/**
- * Consulta información "Acerca de" (Historia, Misión, etc.)
- * @param {string} tipo - Tipo de información (Historia, Misión, Visión, Valores)
- * @returns {object} - Datos obtenidos
- */
+// Consulta información "Acerca de" (Historia, Misión, etc.)
 async function consultarAcercaDe(tipo) {
   try {
     const query = `
@@ -815,10 +763,7 @@ async function consultarAcercaDe(tipo) {
   }
 }
 
-/**
- * Consulta información de contacto
- * @returns {object} - Datos de contacto
- */
+// Consulta información de contacto
 async function consultarContacto() {
   try {
     const query = "SELECT * FROM inf_perfil_empresa LIMIT 1";
@@ -843,30 +788,34 @@ async function consultarContacto() {
   }
 }
 
-/**
- * Selecciona una respuesta aleatoria de las disponibles
- * @param {string} respuestasStr - String con respuestas separadas
- * @returns {string} - Respuesta seleccionada
- */
+// Selecciona una respuesta aleatoria de las disponibles
 function seleccionarRespuestaAleatoria(respuestasStr) {
-  if (!respuestasStr) return "Lo siento, no tengo una respuesta para eso.";
-  
-  // Las respuestas están separadas por |||
-  const respuestas = respuestasStr.split('|||').map(r => r.trim()).filter(r => r);
-  
-  if (respuestas.length === 0) {
-    return "Lo siento, no tengo una respuesta para eso.";
+  try {
+    if (!respuestasStr) {
+      logger.warn("Se intentó seleccionar una respuesta de un string vacío");
+      return "Lo siento, no tengo una respuesta para eso.";
+    }
+    
+    // Las respuestas están separadas por |||
+    const respuestas = respuestasStr.split('|||')
+      .map(r => r.trim())
+      .filter(r => r);
+    
+    if (respuestas.length === 0) {
+      logger.warn("No se encontraron respuestas válidas en el string");
+      return "Lo siento, no tengo una respuesta para eso.";
+    }
+    
+    // Seleccionar una aleatoriamente
+    const indice = Math.floor(Math.random() * respuestas.length);
+    return respuestas[indice];
+  } catch (error) {
+    logger.error(`Error al seleccionar respuesta aleatoria: ${error.message}`);
+    return "Lo siento, ocurrió un error al procesar la respuesta.";
   }
-  
-  // Seleccionar una aleatoriamente
-  const indice = Math.floor(Math.random() * respuestas.length);
-  return respuestas[indice];
 }
 
-/**
- * Consulta los horarios disponibles
- * @returns {object} - Datos de horarios
- */
+// Consulta los horarios disponibles
 async function consultarHorarios() {
   try {
     const query = `
@@ -927,11 +876,7 @@ async function consultarHorarios() {
   }
 }
 
-/**
- * Formatea los horarios para mostrarlos de manera amigable
- * @param {object} horariosPorDia - Horarios agrupados por día
- * @returns {string} - Texto formateado
- */
+// Formatea los horarios para mostrarlos de manera amigable
 function formatearHorarios(horariosPorDia) {
   let resultado = "";
   const diasOrdenados = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
@@ -956,11 +901,7 @@ function formatearHorarios(horariosPorDia) {
   return resultado;
 }
 
-/**
- * Consulta información sobre las citas de un paciente
- * @param {string} identificador - Correo o teléfono del paciente
- * @returns {object} - Datos sobre citas del paciente
- */
+// Consulta información sobre las citas de un paciente
 async function consultarCitasPaciente(identificador) {
   try {
     if (!identificador) {
@@ -1039,10 +980,7 @@ async function consultarCitasPaciente(identificador) {
   }
 }
 
-/**
- * Consulta información sobre precios generales
- * @returns {object} - Información sobre precios
- */
+// Consulta información sobre precios generales
 async function consultarPreciosGenerales() {
   try {
     const query = `
@@ -1081,11 +1019,7 @@ async function consultarPreciosGenerales() {
   }
 }
 
-/**
- * Consulta información legal (términos, deslinde, etc.)
- * @param {string} tabla - Tabla a consultar
- * @returns {object} - Información legal
- */
+// Consulta información legal (términos, deslinde, etc.)
 async function consultarInfoLegal(tabla) {
   try {
     // Validar el nombre de la tabla para evitar SQL injection
@@ -1145,10 +1079,7 @@ async function consultarInfoLegal(tabla) {
   }
 }
 
-/**
- * Consulta redes sociales
- * @returns {object} - Datos de redes sociales
- */
+// Consulta redes sociales
 async function consultarRedesSociales() {
   try {
     const query = "SELECT * FROM inf_redes_sociales ORDER BY nombre_red";
@@ -1176,10 +1107,7 @@ async function consultarRedesSociales() {
   }
 }
 
-/**
- * Consulta datos del perfil de la empresa
- * @returns {object} - Datos de la empresa
- */
+// Consulta datos del perfil de la empresa
 async function consultarPerfilEmpresa() {
   try {
     const query = "SELECT * FROM inf_perfil_empresa LIMIT 1";
@@ -1204,10 +1132,7 @@ async function consultarPerfilEmpresa() {
   }
 }
 
-/**
- * Consulta servicios y tratamientos disponibles
- * @returns {object} - Catálogo de servicios y tratamientos
- */
+// Consulta servicios y tratamientos disponibles
 async function consultarTratamientos() {
   try {
     const query = `
@@ -1298,11 +1223,7 @@ async function consultarTratamientos() {
   }
 }
 
-/**
- * Consulta los detalles de un tratamiento específico
- * @param {string} nombreTratamiento - Nombre del tratamiento a consultar
- * @returns {object} - Datos del tratamiento
- */
+// Consulta los detalles de un tratamiento específico
 async function consultarTratamiento(nombreTratamiento) {
   try {
     if (!nombreTratamiento) {
@@ -1449,12 +1370,7 @@ async function consultarTratamiento(nombreTratamiento) {
   }
 }
 
-/**
- * Filtra los detalles de un tratamiento por tipo
- * @param {Array} detalles - Lista de detalles
- * @param {string} tipo - Tipo de detalle a filtrar
- * @returns {string} - Lista formateada
- */
+// Filtra los detalles de un tratamiento por tipo
 function obtenerDetallesPorTipo(detalles, tipo) {
   if (!detalles || !Array.isArray(detalles) || detalles.length === 0) {
     return "";
@@ -1471,13 +1387,7 @@ function obtenerDetallesPorTipo(detalles, tipo) {
   return filtrados.join(". ");
 }
 
-/**
- * Consulta genérica para cualquier tabla
- * @param {string} tabla - Nombre de la tabla
- * @param {string} campo - Campo a consultar
- * @param {string} condicion - Condición WHERE
- * @returns {object} - Resultados de la consulta
- */
+// Consulta genérica para cualquier tabla
 async function consultaGenerica(tabla, campo, condicion) {
   try {
     // Lista de tablas permitidas para consulta
@@ -1494,34 +1404,64 @@ async function consultaGenerica(tabla, campo, condicion) {
       return { error: "Tabla no permitida" };
     }
     
-    // Validar el campo para evitar SQL injection
-    if (campo !== '*' && !/^[a-zA-Z0-9_,\s]+$/.test(campo)) {
-      return { error: "Campo no válido" };
+    // Mapeo de campos permitidos por tabla
+    const camposPermitidos = {
+      'chatbot': ['id', 'patron', 'categoria', 'respuestas', 'es_plantilla', 'tabla_consulta', 'campo_consulta', 'condicion', 'prioridad', 'fecha_creacion', '*'],
+      'acerca_de': ['id', 'tipo', 'descripcion', 'fecha_creacion', 'fecha_actualizacion', '*'],
+      'servicios': ['id', 'title', 'description', 'category', 'duration', 'price', 'image_url', 'tratamiento', 'citasEstimadas', 'image_name', '*']
+    };
+    
+    // Validar los campos para evitar SQL injection
+    if (campo !== '*') {
+      const camposArray = campo.split(',').map(c => c.trim());
+      const camposValidados = camposPermitidos[tabla] || [];
+      
+      if (!camposArray.every(c => camposValidados.includes(c) || c === '*')) {
+        return { error: "Campos no válidos para esta tabla" };
+      }
     }
     
     // Construir la consulta base
     let query = `SELECT ${campo} FROM ${tabla}`;
+    let params = [];
     
     // Agregar condición si existe
     if (condicion) {
-      // Validación básica de condiciones
-      if (!/^[a-zA-Z0-9_\s=<>'\(\)]+$/.test(condicion)) {
-        return { error: "Condición no válida" };
+      // Extraer variables de la condición para usar parámetros
+      // Esto es una versión simplificada, para una implementación completa habría que parsear la condición
+      if (condicion.includes('=') && condicion.includes("'")) {
+        const matches = condicion.match(/([a-zA-Z0-9_]+)\s*=\s*'([^']+)'/);
+        if (matches && matches.length === 3) {
+          query += ` WHERE ${matches[1]} = ?`;
+          params.push(matches[2]);
+        } else {
+          query += ` WHERE ${condicion}`;
+        }
+      } else {
+        query += ` WHERE ${condicion}`;
       }
-      
-      query += ` WHERE ${condicion}`;
     }
     
     // Limitar resultados por seguridad
     query += " LIMIT 10";
     
-    const resultados = await executeQuery(query);
+    const resultados = await executeQuery(query, params);
     
     if (resultados.length === 0) {
       return { error: "No se encontraron resultados" };
     }
     
-    return { resultados: resultados };
+    // Extraer los valores para plantillas dependiendo de la tabla consultada
+    let respuesta = { resultados };
+    
+    // Para algunas tablas, preparar formatos específicos para las plantillas
+    if (tabla === 'servicios' && campo === '*') {
+      respuesta.servicios = resultados.map(s => s.title).join(', ');
+    } else if (tabla === 'acerca_de' && condicion?.includes("tipo = 'Historia'")) {
+      respuesta.descripcion = resultados[0]?.descripcion || '';
+    }
+    
+    return respuesta;
     
   } catch (error) {
     logger.error(`Error en consulta genérica: ${error.message}`);
@@ -1529,12 +1469,53 @@ async function consultaGenerica(tabla, campo, condicion) {
   }
 }
 
-/**
- * Reemplaza variables de plantilla con datos reales
- * @param {string} plantilla - Texto con variables {{variable}}
- * @param {object} datos - Datos para reemplazar variables
- * @returns {string} - Texto con variables reemplazadas
- */
+// Consulta información para citas genéricas (no de un paciente específico)
+async function consultarInfoCitas() {
+  try {
+    // Consultar información general sobre citas
+    const query = `
+      SELECT 'consulta_sobre_servicio' as patron,
+             'Servicios' as categoria,
+             'El servicio {{servicio}} tiene un costo de ${{precio}} MXN y una duración aproximada de {{duracion}}. {{descripcion}} ¿Te gustaría agendar una cita?' as respuestas,
+             1 as es_plantilla
+      FROM chatbot
+      WHERE patron = 'consulta_sobre_servicio'
+      AND categoria = 'Servicios'
+      AND es_plantilla = 1
+      LIMIT 1
+    `;
+    
+    const resultado = await executeQuery(query);
+    
+    if (resultado.length === 0) {
+      return {
+        mensaje: "Para agendar una cita, puedes llamar a nuestro número telefónico o dejarnos tus datos para contactarte.",
+        proceso: "Para programar una cita, comunícate a nuestro teléfono o proporciónanos tus datos de contacto."
+      };
+    }
+    
+    // Obtener información de contacto para incluir en la respuesta
+    const contacto = await consultarContacto();
+    
+    return {
+      mensaje: "Para agendar una cita, puedes contactarnos directamente.",
+      proceso: "El proceso para agendar una cita es sencillo, solo necesitas comunicarte con nosotros por teléfono o correo.",
+      telefono: contacto.telefono_principal || "No disponible",
+      correo: contacto.correo_electronico || "No disponible",
+      horarios: await consultarHorarios(),
+      recomendaciones: "Te recomendamos llegar 15 minutos antes de tu cita programada y traer identificación."
+    };
+    
+  } catch (error) {
+    logger.error(`Error al consultar información de citas: ${error.message}`);
+    return {
+      error: "Error al obtener información sobre citas",
+      mensaje: "Para agendar una cita, comunícate directamente a nuestro número telefónico."
+    };
+  }
+}
+
+// Reemplaza variables de plantilla con datos reales
 function reemplazarVariables(plantilla, datos) {
   // Si no hay datos, devolver la plantilla original
   if (!datos || !plantilla) return plantilla || "";
@@ -1597,11 +1578,7 @@ function reemplazarVariables(plantilla, datos) {
   return resultado;
 }
 
-/**
- * Obtiene alternativas para una variable
- * @param {string} variable - Nombre de la variable
- * @returns {Array} - Lista de nombres alternativos
- */
+// Obtiene alternativas para una variable
 function obtieneAlternativasVariable(variable) {
   // Mapeo de variables a posibles alternativas
   const alternativas = {
@@ -1620,12 +1597,7 @@ function obtieneAlternativasVariable(variable) {
   return alternativas[variable] || [];
 }
 
-/**
- * Obtiene un valor predeterminado para variables no encontradas
- * @param {string} variable - Nombre de la variable
- * @param {object} datos - Datos disponibles para contexto
- * @returns {string} - Valor predeterminado
- */
+// Obtiene un valor predeterminado para variables no encontradas
 function obtenerValorPredeterminado(variable, datos) {
   switch (variable) {
     case 'servicio':
@@ -1655,9 +1627,7 @@ function obtenerValorPredeterminado(variable, datos) {
   }
 }
 
-/**
- * Endpoint para obtener las preguntas frecuentes
- */
+// Endpoint para obtener las preguntas frecuentes
 router.get("/preguntas-frecuentes", async (req, res) => {
   try {
     const query = `
@@ -1669,8 +1639,6 @@ router.get("/preguntas-frecuentes", async (req, res) => {
     
     const preguntas = await executeQuery(query);
     
-    // Retornar las preguntas encontradas de la base de datos, sin proporcionar valores por defecto
-    // ya que todo debe ser dinámico
     return res.json({ 
       preguntas,
       total: preguntas.length 
@@ -1679,7 +1647,6 @@ router.get("/preguntas-frecuentes", async (req, res) => {
   } catch (error) {
     logger.error(`Error al obtener preguntas frecuentes: ${error.message}`);
     
-    // Retornar un error sin proporcionar valores por defecto
     return res.status(500).json({ 
       error: "Error al obtener preguntas frecuentes de la base de datos",
       preguntas: [],
@@ -1688,16 +1655,14 @@ router.get("/preguntas-frecuentes", async (req, res) => {
   }
 });
 
-/**
- * Endpoint para obtener patrones del chatbot
- */
+// Endpoint para obtener patrones del chatbot
 router.get("/patrones", async (req, res) => {
   try {
     // Filtrar por categoría si se especifica
     const { categoria } = req.query;
     
     let query = `
-      SELECT id, patron, categoria, respuesta, prioridad 
+      SELECT id, patron, categoria, respuestas, prioridad 
       FROM chatbot
     `;
     
@@ -1748,9 +1713,7 @@ router.get("/patrones", async (req, res) => {
   }
 });
 
-/**
- * Endpoint para obtener información de tratamientos
- */
+// Endpoint para obtener información de tratamientos
 router.get("/tratamientos", async (req, res) => {
   try {
     const { categoria } = req.query;
@@ -1778,11 +1741,7 @@ router.get("/tratamientos", async (req, res) => {
   }
 });
 
-/**
- * Consulta tratamientos por categoría
- * @param {string} categoria - Categoría a consultar
- * @returns {object} - Datos de tratamientos
- */
+// Consulta tratamientos por categoría
 async function consultarTratamientosPorCategoria(categoria) {
   try {
     const query = `
@@ -1820,9 +1779,7 @@ async function consultarTratamientosPorCategoria(categoria) {
   }
 }
 
-/**
- * Endpoint para obtener detalles de un tratamiento
- */
+// Endpoint para obtener detalles de un tratamiento
 router.get("/tratamiento", async (req, res) => {
   try {
     const { nombre, id } = req.query;
@@ -1853,11 +1810,7 @@ router.get("/tratamiento", async (req, res) => {
   }
 });
 
-/**
- * Consulta tratamiento por ID
- * @param {number} id - ID del tratamiento
- * @returns {object} - Datos del tratamiento
- */
+// Consulta tratamiento por ID
 async function consultarTratamientoPorId(id) {
   try {
     const query = `
@@ -1908,9 +1861,7 @@ async function consultarTratamientoPorId(id) {
   }
 }
 
-/**
- * Endpoint para obtener horarios
- */
+// Endpoint para obtener horarios
 router.get("/horarios", async (req, res) => {
   try {
     const { dia } = req.query;
@@ -1943,11 +1894,7 @@ router.get("/horarios", async (req, res) => {
   }
 });
 
-/**
- * Consulta horarios de un día específico
- * @param {string} dia - Día de la semana
- * @returns {object} - Datos de horarios del día
- */
+// Consulta horarios de un día específico
 async function consultarHorarioPorDia(dia) {
   try {
     // Normalizar el día (primera letra mayúscula, resto minúsculas)
@@ -2028,9 +1975,7 @@ async function consultarHorarioPorDia(dia) {
   }
 }
 
-/**
- * Endpoint para obtener información de la empresa
- */
+// Endpoint para obtener información de la empresa
 router.get("/perfil-empresa", async (req, res) => {
   try {
     const datos = await consultarPerfilEmpresa();
@@ -2049,9 +1994,7 @@ router.get("/perfil-empresa", async (req, res) => {
   }
 });
 
-/**
- * Endpoint para obtener información "Acerca de"
- */
+// Endpoint para obtener información "Acerca de"
 router.get("/acerca-de", async (req, res) => {
   try {
     const { tipo } = req.query;
@@ -2096,9 +2039,7 @@ router.get("/acerca-de", async (req, res) => {
   }
 });
 
-/**
- * Endpoint para obtener redes sociales
- */
+// Endpoint para obtener redes sociales
 router.get("/redes-sociales", async (req, res) => {
   try {
     const datos = await consultarRedesSociales();
@@ -2117,233 +2058,7 @@ router.get("/redes-sociales", async (req, res) => {
   }
 });
 
-/**
- * Endpoint de diagnóstico para verificar conexión con la base de datos
- */
-router.get("/diagnostico", async (req, res) => {
-    try {
-      // 1. Verificar tablas principales
-      const tablasVerificar = [
-        'chatbot', 'acerca_de', 'servicios', 'horarios', 
-        'inf_perfil_empresa', 'preguntas_frecuentes'
-      ];
-      
-      const resultadosTablas = {};
-      
-      for (const tabla of tablasVerificar) {
-        try {
-          // Verificar existencia de la tabla
-          const existeQuery = `
-            SELECT COUNT(*) as existe
-            FROM information_schema.tables
-            WHERE table_schema = DATABASE() AND table_name = ?
-          `;
-          
-          const existeResultado = await executeQuery(existeQuery, [tabla]);
-          const existe = existeResultado[0].existe > 0;
-          
-          // Contar registros si la tabla existe
-          let conteo = 0;
-          if (existe) {
-            const conteoQuery = `SELECT COUNT(*) as total FROM ${tabla}`;
-            const conteoResultado = await executeQuery(conteoQuery);
-            conteo = conteoResultado[0].total;
-          }
-          
-          resultadosTablas[tabla] = { existe, registros: conteo };
-        } catch (error) {
-          resultadosTablas[tabla] = { 
-            existe: false, 
-            error: error.message,
-            registros: 0
-          };
-        }
-      }
-      
-      // 2. Verificar patrones de saludo específicamente
-      let patronesSaludo = [];
-      try {
-        const saludosQuery = `
-          SELECT id, patron, LEFT(respuesta, 100) as respuesta_preview, prioridad
-          FROM chatbot 
-          WHERE categoria = 'General' AND
-                (patron = 'hola' OR patron LIKE '%salud%' OR patron LIKE '%buenos%')
-          ORDER BY prioridad DESC
-        `;
-        patronesSaludo = await executeQuery(saludosQuery);
-      } catch (error) {
-        patronesSaludo = { error: error.message };
-      }
-      
-      // 3. Verificar función extraerEntidades
-      let testEntidades = null;
-      try {
-        const mensajePrueba = "Hola, quiero información sobre limpieza dental y horarios";
-        testEntidades = extraerEntidades(mensajePrueba);
-      } catch (error) {
-        testEntidades = { error: error.message };
-      }
-      
-      // 4. Probar la función consultarAcercaDe
-      let testMision = null;
-      try {
-        testMision = await consultarAcercaDe("Misión");
-      } catch (error) {
-        testMision = { error: error.message };
-      }
-      
-      // 5. Probar la función buscarIntencion
-      let testIntencion = null;
-      try {
-        testIntencion = await buscarIntencion("hola");
-      } catch (error) {
-        testIntencion = { error: error.message };
-      }
-      
-      // Devolver resultados
-      return res.json({
-        estado: "success",
-        mensaje: "Diagnóstico completado",
-        tablas: resultadosTablas,
-        patronesSaludo,
-        testEntidades,
-        testMision,
-        testIntencion,
-        timestamp: new Date().toISOString()
-      });
-      
-    } catch (error) {
-      logger.error(`Error en diagnóstico: ${error.stack}`);
-      return res.status(500).json({ 
-        error: "Error al realizar diagnóstico",
-        mensaje: error.message,
-        stack: error.stack
-      });
-    }
-  });
-  
-  /**
-   * Actualiza la función consultarAcercaDe con mejor manejo de errores
-   */
-  async function consultarAcercaDe(tipo) {
-    try {
-      // Primero verificamos la existencia de la tabla
-      const verificarTablaQuery = `
-        SELECT COUNT(*) as existe
-        FROM information_schema.tables
-        WHERE table_schema = DATABASE() 
-        AND table_name = 'acerca_de'
-      `;
-      
-      const tablaExiste = await executeQuery(verificarTablaQuery);
-      
-      if (!tablaExiste[0].existe) {
-        logger.error(`La tabla acerca_de no existe en la base de datos`);
-        return { 
-          error: "La tabla de información institucional no está disponible",
-          tipo: tipo,
-          solucion: "Contacte al administrador del sistema"
-        };
-      }
-      
-      // Ahora verificamos la estructura de la tabla
-      const columnas = await executeQuery(`SHOW COLUMNS FROM acerca_de`);
-      const tieneColumnasTipoDescripcion = columnas.some(col => col.Field === 'tipo') &&
-                                          columnas.some(col => col.Field === 'descripcion');
-      
-      if (!tieneColumnasTipoDescripcion) {
-        logger.error(`La tabla acerca_de no tiene las columnas requeridas (tipo, descripcion)`);
-        return { 
-          error: "La estructura de la tabla es incorrecta", 
-          tipo: tipo,
-          columnas_disponibles: columnas.map(c => c.Field).join(', ')
-        };
-      }
-      
-      // Realizar la consulta
-      const query = `
-        SELECT * FROM acerca_de
-        WHERE tipo = ?
-        LIMIT 1
-      `;
-      
-      const resultado = await executeQuery(query, [tipo]);
-      
-      if (resultado.length === 0) {
-        logger.info(`No se encontró información de tipo "${tipo}" en acerca_de`);
-        return { 
-          error: `No se encontró información sobre ${tipo.toLowerCase()}`,
-          tipo: tipo,
-          sugerencia: "Verifique la existencia del registro en la tabla acerca_de"
-        };
-      }
-      
-      return resultado[0];
-      
-    } catch (error) {
-      logger.error(`Error detallado al consultar acerca_de: ${error.stack}`);
-      return { 
-        error: "Error al obtener la información institucional",
-        detalle: error.message,
-        tipo: tipo
-      };
-    }
-  }
-  
-  /**
-   * Función mejorada para normalizar el texto, evitando errores comunes
-   */
-  function normalizarTexto(texto) {
-    if (!texto) return "";
-    
-    try {
-      // Normalización más robusta
-      return texto.toLowerCase()
-        .normalize("NFD")
-        .replace(/[\u0300-\u036f]/g, "") // Eliminar acentos
-        .replace(/[^\w\s]/gi, " ")       // Reemplazar caracteres especiales por espacios
-        .replace(/\s+/g, " ")            // Eliminar espacios múltiples
-        .trim();
-    } catch (error) {
-      logger.error(`Error al normalizar texto: ${error.message}`);
-      // En caso de error, intentar simplemente con toLowerCase
-      return String(texto).toLowerCase().trim();
-    }
-  }
-  
-  /**
-   * Función mejorada para seleccionar respuesta aleatoria
-   * con mejor manejo de errores
-   */
-  function seleccionarRespuestaAleatoria(respuestasStr) {
-    try {
-      if (!respuestasStr) {
-        logger.warn("Se intentó seleccionar una respuesta de un string vacío");
-        return "Lo siento, no tengo una respuesta para eso.";
-      }
-      
-      // Las respuestas están separadas por |||
-      const respuestas = respuestasStr.split('|||')
-        .map(r => r.trim())
-        .filter(r => r);
-      
-      if (respuestas.length === 0) {
-        logger.warn("No se encontraron respuestas válidas en el string");
-        return "Lo siento, no tengo una respuesta para eso.";
-      }
-      
-      // Seleccionar una aleatoriamente
-      const indice = Math.floor(Math.random() * respuestas.length);
-      return respuestas[indice];
-    } catch (error) {
-      logger.error(`Error al seleccionar respuesta aleatoria: ${error.message}`);
-      return "Lo siento, ocurrió un error al procesar la respuesta.";
-    }
-  }
-
-/**
- * Endpoint para obtener documentos legales
- */
+// Endpoint para obtener documentos legales
 router.get("/legal/:tipo", async (req, res) => {
   try {
     const { tipo } = req.params;
@@ -2387,9 +2102,7 @@ router.get("/legal/:tipo", async (req, res) => {
   }
 });
 
-/**
- * Endpoint para obtener información de citas
- */
+// Endpoint para obtener información de citas
 router.get("/citas", async (req, res) => {
   try {
     const datos = await consultarInfoCitas();
@@ -2404,6 +2117,109 @@ router.get("/citas", async (req, res) => {
     logger.error(`Error al obtener información de citas: ${error.message}`);
     return res.status(500).json({ 
       error: "Error en la consulta a la base de datos para obtener información de citas"
+    });
+  }
+});
+
+// Endpoint de diagnóstico para verificar conexión con la base de datos
+router.get("/diagnostico", async (req, res) => {
+  try {
+    // 1. Verificar tablas principales
+    const tablasVerificar = [
+      'chatbot', 'acerca_de', 'servicios', 'horarios', 
+      'inf_perfil_empresa', 'preguntas_frecuentes'
+    ];
+    
+    const resultadosTablas = {};
+    
+    for (const tabla of tablasVerificar) {
+      try {
+        // Verificar existencia de la tabla
+        const existeQuery = `
+          SELECT COUNT(*) as existe
+          FROM information_schema.tables
+          WHERE table_schema = DATABASE() AND table_name = ?
+        `;
+        
+        const existeResultado = await executeQuery(existeQuery, [tabla]);
+        const existe = existeResultado[0].existe > 0;
+        
+        // Contar registros si la tabla existe
+        let conteo = 0;
+        if (existe) {
+          const conteoQuery = `SELECT COUNT(*) as total FROM ${tabla}`;
+          const conteoResultado = await executeQuery(conteoQuery);
+          conteo = conteoResultado[0].total;
+        }
+        
+        resultadosTablas[tabla] = { existe, registros: conteo };
+      } catch (error) {
+        resultadosTablas[tabla] = { 
+          existe: false, 
+          error: error.message,
+          registros: 0
+        };
+      }
+    }
+    
+    // 2. Verificar patrones de saludo específicamente
+    let patronesSaludo = [];
+    try {
+      const saludosQuery = `
+        SELECT id, patron, LEFT(respuestas, 100) as respuesta_preview, prioridad
+        FROM chatbot 
+        WHERE categoria = 'General' AND
+              (patron = 'hola' OR patron LIKE '%salud%' OR patron LIKE '%buenos%')
+        ORDER BY prioridad DESC
+      `;
+      patronesSaludo = await executeQuery(saludosQuery);
+    } catch (error) {
+      patronesSaludo = { error: error.message };
+    }
+    
+    // 3. Verificar función extraerEntidades
+    let testEntidades = null;
+    try {
+      const mensajePrueba = "Hola, quiero información sobre limpieza dental y horarios";
+      testEntidades = extraerEntidades(mensajePrueba);
+    } catch (error) {
+      testEntidades = { error: error.message };
+    }
+    
+    // 4. Probar la función consultarAcercaDe
+    let testMision = null;
+    try {
+      testMision = await consultarAcercaDe("Misión");
+    } catch (error) {
+      testMision = { error: error.message };
+    }
+    
+    // 5. Probar la función buscarIntencion
+    let testIntencion = null;
+    try {
+      testIntencion = await buscarIntencion("hola");
+    } catch (error) {
+      testIntencion = { error: error.message };
+    }
+    
+    // Devolver resultados
+    return res.json({
+      estado: "success",
+      mensaje: "Diagnóstico completado",
+      tablas: resultadosTablas,
+      patronesSaludo,
+      testEntidades,
+      testMision,
+      testIntencion,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    logger.error(`Error en diagnóstico: ${error.stack}`);
+    return res.status(500).json({ 
+      error: "Error al realizar diagnóstico",
+      mensaje: error.message,
+      stack: error.stack
     });
   }
 });
