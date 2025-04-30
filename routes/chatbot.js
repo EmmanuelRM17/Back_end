@@ -32,12 +32,27 @@ router.post("/mensaje", async (req, res) => {
       });
     }
     
-    // Procesamos el mensaje y obtenemos respuesta
-    const respuesta = await procesarMensaje(mensaje, contexto);
-    logger.info(`Mensaje procesado: "${mensaje.substring(0, 50)}..." - Tipo: ${respuesta.tipo}`);
+    // Mejorar el manejo de contexto
+    const contextoActualizado = {
+      ...contexto,
+      ultimas_entidades: contexto.entidades || {},
+      ultimo_mensaje: contexto.mensaje || "",
+      contador_interacciones: (contexto.contador_interacciones || 0) + 1
+    };
     
-    // Verificar si necesitamos mantener contexto para la siguiente interacción
-    const nuevoContexto = respuesta.contexto || {};
+    // Procesamos el mensaje y obtenemos respuesta
+    const respuesta = await procesarMensaje(mensaje, contextoActualizado);
+    
+    // Actualizar contexto para la siguiente interacción
+    const nuevoContexto = {
+      ...respuesta.contexto,
+      mensaje: mensaje,
+      entidades: respuesta.entidades,
+      tipo_respuesta: respuesta.tipo,
+      timestamp: new Date().toISOString()
+    };
+    
+    logger.info(`Mensaje procesado: "${mensaje.substring(0, 50)}..." - Tipo: ${respuesta.tipo}`);
     
     return res.json({
       ...respuesta,
@@ -57,12 +72,66 @@ router.post("/mensaje", async (req, res) => {
 // Procesa el mensaje del usuario y genera una respuesta apropiada
 async function procesarMensaje(mensaje, contexto = {}) {
   try {
+    // Aplicar correcciones ortográficas básicas
+    const mensajeCorregido = corregirErroresOrtograficos(mensaje);
+    
     // Normalizar el mensaje (minúsculas, quitar caracteres especiales, etc.)
-    const mensajeNormalizado = normalizarTexto(mensaje);
+    const mensajeNormalizado = normalizarTexto(mensajeCorregido);
     
     // 1. Extraer entidades/servicios específicos del mensaje
     const entidades = extraerEntidades(mensajeNormalizado);
     entidades.tratamientos = await extraerTratamientos(mensajeNormalizado);
+    
+    // Verificar consulta sobre día específico para horarios
+    if (entidades.horarios && entidades.dia_especifico) {
+      const horarioDia = await consultarHorarioPorDia(entidades.dia_especifico);
+      
+      if (!horarioDia.error) {
+        return {
+          respuesta: `Para el día ${entidades.dia_especifico}: ${horarioDia.texto_horarios}`,
+          tipo: "Horario",
+          subtipo: "dia_especifico",
+          datos: horarioDia,
+          entidades
+        };
+      } else {
+        return {
+          respuesta: horarioDia.error,
+          tipo: "Horario",
+          subtipo: "dia_no_disponible",
+          datos: horarioDia,
+          entidades
+        };
+      }
+    }
+    
+    // Caso especial para fin de semana
+    if (entidades.dia_especifico === 'fin_semana') {
+      const horarioSabado = await consultarHorarioPorDia('Sábado');
+      const horarioDomingo = await consultarHorarioPorDia('Domingo');
+      
+      let respuestaFinSemana = "Horarios de fin de semana: ";
+      
+      if (!horarioSabado.error) {
+        respuestaFinSemana += `Sábado: ${horarioSabado.texto_horarios}. `;
+      } else {
+        respuestaFinSemana += "No atendemos los sábados. ";
+      }
+      
+      if (!horarioDomingo.error) {
+        respuestaFinSemana += `Domingo: ${horarioDomingo.texto_horarios}.`;
+      } else {
+        respuestaFinSemana += "No atendemos los domingos.";
+      }
+      
+      return {
+        respuesta: respuestaFinSemana,
+        tipo: "Horario",
+        subtipo: "fin_semana",
+        datos: { sabado: horarioSabado, domingo: horarioDomingo },
+        entidades
+      };
+    }
     
     // 2. Verificar si es una consulta de citas existentes
     if (entidades.citas && (contexto.esperandoIdentificador === true || contexto.procesandoCita === true)) {
@@ -113,8 +182,51 @@ async function procesarMensaje(mensaje, contexto = {}) {
       }
     }
     
+    // Consultas sobre precios de tratamientos específicos
+    if (entidades.tratamientos.length > 0 && entidades.pago) {
+      const tratamiento = entidades.tratamientos[0];
+      const datoTratamiento = await consultarTratamiento(tratamiento);
+      
+      if (datoTratamiento && !datoTratamiento.error) {
+        return {
+          respuesta: `El precio del tratamiento de ${datoTratamiento.nombre} es de $${datoTratamiento.precio} MXN.`,
+          tipo: "Precios",
+          subtipo: "precio_especifico",
+          datos: datoTratamiento,
+          entidades
+        };
+      }
+    }
+    
+    // Consultas sobre detalles de tratamientos específicos
+    if (entidades.tratamientos.length > 0 && !entidades.pago && !entidades.horarios) {
+      const tratamiento = entidades.tratamientos[0];
+      const datoTratamiento = await consultarTratamiento(tratamiento);
+      
+      if (datoTratamiento && !datoTratamiento.error) {
+        let respuesta = `Ofrecemos el servicio de ${datoTratamiento.nombre}.`;
+        
+        if (datoTratamiento.descripcion) {
+          respuesta += ` ${datoTratamiento.descripcion}`;
+        }
+        
+        // Añadir información sobre duración si está disponible
+        if (datoTratamiento.duracion) {
+          respuesta += ` El procedimiento toma aproximadamente ${datoTratamiento.duracion}.`;
+        }
+        
+        return {
+          respuesta: respuesta,
+          tipo: "Servicios",
+          subtipo: "servicio_especifico",
+          datos: datoTratamiento,
+          entidades
+        };
+      }
+    }
+    
     // 3. Buscar intenciones que coincidan con el mensaje
-    const intencion = await buscarIntencion(mensajeNormalizado);
+    const intencion = await buscarIntencionMejorada(mensajeNormalizado);
     
     // 4. Manejar casos específicos si no encontramos una intención clara
     if (!intencion) {
@@ -127,7 +239,7 @@ async function procesarMensaje(mensaje, contexto = {}) {
           let respuesta = `Ofrecemos el servicio de ${datoTratamiento.nombre || tratamiento}.`;
           
           if (datoTratamiento.precio) {
-            respuesta += ` El precio es ${datoTratamiento.precio} MXN.`;
+            respuesta += ` El precio es $${datoTratamiento.precio} MXN.`;
           }
           
           if (datoTratamiento.duracion) {
@@ -216,7 +328,7 @@ async function procesarMensaje(mensaje, contexto = {}) {
       
       // Respuesta por defecto si no se encuentra ninguna intención específica
       return {
-        respuesta: "Lo siento, no entendí tu consulta. ¿Podrías ser más específico o preguntar de otra manera? Puedo ayudarte con información sobre nuestros servicios, horarios o verificar tus citas existentes.",
+        respuesta: "Lo siento, no entendí tu petición. ¿Podrías ser más específico o preguntar de otra manera? Puedo ayudarte con información sobre nuestros servicios, horarios o verificar tus citas existentes.",
         tipo: "default",
         datos: null,
         entidades
@@ -232,38 +344,139 @@ async function procesarMensaje(mensaje, contexto = {}) {
   }
 }
 
+// Aplica correcciones ortográficas básicas
+function corregirErroresOrtograficos(texto) {
+  // Diccionario básico de correcciones comunes
+  const correcciones = {
+    'orario': 'horario',
+    'ora': 'hora',
+    'sabados': 'sábados',
+    'savado': 'sábado',
+    'sabado': 'sábado',
+    'domingo': 'domingo',
+    'kiero': 'quiero',
+    'ke': 'que',
+    'k': 'que',
+    'xq': 'porque',
+    'pq': 'porque',
+    'info': 'información',
+    'asegurar': 'agendar',
+    'tmbn': 'también',
+    'x': 'por',
+    'q': 'que',
+    'atiención': 'atención',
+    'attención': 'atención',
+    'preccion': 'precio',
+    'presio': 'precio',
+    'cta': 'cita',
+    'tel': 'teléfono',
+    'telefno': 'teléfono',
+    'telefno': 'teléfono',
+    'nescito': 'necesito',
+    'nesecito': 'necesito',
+    'voi': 'voy',
+    'boy': 'voy',
+    'sacar': 'agendar',
+    'limpiesa': 'limpieza',
+    'atienden': 'atienden',
+    'abren': 'abren',
+    'horarios': 'horarios',
+    'estan': 'están',
+    'implntes': 'implantes',
+    'inplantes': 'implantes',
+    'ase': 'hace',
+    'endodonsia': 'endodoncia',
+    'cuestan': 'cuestan',
+    'kuesta': 'cuesta',
+    'servizio': 'servicio',
+    'urgente': 'urgente',
+    'muela': 'muela',
+    'dolor': 'dolor',
+    'gracias': 'gracias',
+    'mersii': 'gracias',
+    'adios': 'adiós',
+    'chao': 'adiós',
+    'bracket': 'brackets',
+    'brakets': 'brackets',
+    'doktor': 'doctor',
+    'dr': 'doctor',
+    'sirugia': 'cirugía',
+    'cirugia': 'cirugía'
+  };
+  
+  // Tokenizar el texto y corregir palabras
+  return texto
+    .split(' ')
+    .map(palabra => {
+      const palabraLower = palabra.toLowerCase().trim();
+      return correcciones[palabraLower] || palabra;
+    })
+    .join(' ');
+}
+
 // Busca una pregunta frecuente que coincida con el mensaje
 async function buscarPreguntaFrecuente(mensaje) {
   try {
+    // Ampliar la búsqueda con sinónimos
+    const tokensBase = mensaje.split(/\s+/).filter(t => t.length > 3);
+    const tokensConSinonimos = [];
+    
+    // Agregar los tokens originales
+    tokensBase.forEach(token => {
+      tokensConSinonimos.push(token);
+      // Agregar sinónimos si existen
+      const sinonimos = expandirSinonimos(token);
+      sinonimos.forEach(sinonimo => {
+        if (!tokensConSinonimos.includes(sinonimo)) {
+          tokensConSinonimos.push(sinonimo);
+        }
+      });
+    });
+    
+    // Construir condición dinámica para la consulta
+    let condicionLike = tokensConSinonimos.map(token => 
+      `pregunta LIKE '%${token}%'`
+    ).join(' OR ');
+    
     // Consulta para buscar preguntas similares
     const query = `
-      SELECT id, pregunta, respuesta
+      SELECT id, pregunta, respuesta,
+             (
+               CASE
+                 WHEN pregunta = ? THEN 100
+                 WHEN pregunta LIKE ? THEN 80
+                 WHEN ? LIKE CONCAT('%', pregunta, '%') THEN 70
+                 ELSE (
+                   SELECT COUNT(*) * 10 
+                   FROM (
+                     SELECT unnest(ARRAY[${tokensConSinonimos.map(() => '?').join(', ')}]) AS token
+                   ) AS tokens
+                   WHERE pregunta LIKE CONCAT('%', token, '%')
+                 )
+               END
+             ) AS relevancia
       FROM preguntas_frecuentes
       WHERE 
         estado = 'registrado' AND
         (
+          pregunta = ? OR
           pregunta LIKE ? OR
-          ? LIKE CONCAT('%', pregunta, '%')
+          ? LIKE CONCAT('%', pregunta, '%') OR
+          ${condicionLike}
         )
-      ORDER BY 
-        CASE 
-          WHEN pregunta LIKE ? THEN 1
-          WHEN ? LIKE CONCAT('%', pregunta, '%') THEN 2
-          ELSE 3
-        END,
-        LENGTH(pregunta) DESC
+      HAVING relevancia > 20
+      ORDER BY relevancia DESC, LENGTH(pregunta) DESC
       LIMIT 1
     `;
     
-    const resultados = await executeQuery(
-      query, 
-      [
-        `%${mensaje}%`,
-        mensaje,
-        `%${mensaje}%`,
-        mensaje
-      ]
-    );
+    // Preparar parámetros para la consulta
+    const params = [
+      mensaje, `%${mensaje}%`, mensaje,
+      ...tokensConSinonimos,
+      mensaje, `%${mensaje}%`, mensaje
+    ];
+    
+    const resultados = await executeQuery(query, params);
     
     if (resultados.length > 0) {
       return resultados[0];
@@ -274,6 +487,28 @@ async function buscarPreguntaFrecuente(mensaje) {
     logger.error(`Error al buscar pregunta frecuente: ${error.message}`);
     return null;
   }
+}
+
+// Implementa un sistema de sinónimos para mejorar la comprensión
+function expandirSinonimos(palabra) {
+  const diccionarioSinonimos = {
+    'doctor': ['dentista', 'odontólogo', 'especialista', 'médico', 'profesional'],
+    'tratamiento': ['procedimiento', 'servicio', 'atención', 'intervención'],
+    'precio': ['costo', 'valor', 'tarifa', 'cuánto cuesta', 'cuánto vale'],
+    'horario': ['hora', 'horarios', 'horas', 'cuando atienden', 'cuando abren'],
+    'cita': ['consulta', 'turno', 'reservación', 'agenda', 'programación'],
+    'ubicación': ['dirección', 'donde están', 'dónde quedan', 'cómo llegar'],
+    'emergencia': ['urgencia', 'urgente', 'dolor', 'accidente'],
+    'limpieza': ['profilaxis', 'higiene', 'limpieza dental'],
+    'brackets': ['ortodoncia', 'frenos', 'aparatos'],
+    'endodoncia': ['tratamiento de conducto', 'nervio', 'conducto'],
+    'extracción': ['sacar muela', 'quitar diente', 'extracción dental'],
+    'implante': ['implantes dentales', 'prótesis fija', 'diente artificial'],
+    'corona': ['funda', 'corona dental'],
+    'prótesis': ['dentadura', 'puente', 'dientes postizos']
+  };
+  
+  return diccionarioSinonimos[palabra.toLowerCase()] || [palabra];
 }
 
 // Normaliza el texto del mensaje para facilitar el procesamiento
@@ -298,6 +533,7 @@ function extraerEntidades(mensaje) {
   const entidades = {
     tratamientos: [],
     horarios: false,
+    dia_especifico: null,
     ubicacion: false,
     contacto: false,
     citas: false,
@@ -310,43 +546,89 @@ function extraerEntidades(mensaje) {
   };
   
   // Palabras clave para detectar intención sobre horarios
-  const palabrasHorario = ['horario', 'hora', 'abierto', 'disponible', 'atienden', 'cuando', 'cuándo', 'dias', 'días'];
+  const palabrasHorario = ['horario', 'hora', 'abierto', 'disponible', 'atienden', 'cuando', 'cuándo', 'dias', 'días', 'abren', 'cierran'];
   entidades.horarios = palabrasHorario.some(palabra => mensaje.includes(palabra));
   
+  // Detectar días específicos
+  const diasSemana = {
+    'lunes': 'Lunes',
+    'martes': 'Martes',
+    'miercoles': 'Miércoles',
+    'miércoles': 'Miércoles',
+    'jueves': 'Jueves',
+    'viernes': 'Viernes',
+    'sabado': 'Sábado',
+    'sábado': 'Sábado',
+    'domingo': 'Domingo',
+    'fin de semana': 'fin_semana',
+    'fines de semana': 'fin_semana',
+    'sabados y domingos': 'fin_semana',
+    'sábados y domingos': 'fin_semana'
+  };
+  
+  // Buscar días específicos en el mensaje
+  for (const [dia, formato] of Object.entries(diasSemana)) {
+    if (mensaje.includes(dia)) {
+      entidades.dia_especifico = formato;
+      break;
+    }
+  }
+  
+  // Buscar días por abreviatura (lun, mar, mie, jue, vie)
+  const abreviaturas = {
+    'lun': 'Lunes',
+    'mar': 'Martes',
+    'mie': 'Miércoles',
+    'jue': 'Jueves',
+    'vie': 'Viernes',
+    'sab': 'Sábado',
+    'dom': 'Domingo',
+  };
+  
+  // Si no se encontró por nombre completo, buscar por abreviatura
+  if (!entidades.dia_especifico) {
+    for (const [abrev, formato] of Object.entries(abreviaturas)) {
+      if (mensaje.includes(` ${abrev} `)) {
+        entidades.dia_especifico = formato;
+        break;
+      }
+    }
+  }
+  
   // Palabras clave para detectar intención sobre ubicación
-  const palabrasUbicacion = ['donde', 'dónde', 'ubicacion', 'ubicación', 'dirección', 'direccion', 'llegar', 'encuentran'];
+  const palabrasUbicacion = ['donde', 'dónde', 'ubicacion', 'ubicación', 'dirección', 'direccion', 'llegar', 'encuentran', 'como llegar', 'calle', 'avenida', 'boulevard', 'blvd', 'colonia', 'domicilio', 'mapa'];
   entidades.ubicacion = palabrasUbicacion.some(palabra => mensaje.includes(palabra));
   
   // Palabras clave para detectar intención sobre contacto
-  const palabrasContacto = ['contacto', 'telefono', 'teléfono', 'llamar', 'email', 'correo', 'whatsapp', 'contactar'];
+  const palabrasContacto = ['contacto', 'telefono', 'teléfono', 'llamar', 'email', 'correo', 'whatsapp', 'contactar', 'celular', 'comunico', 'comunicarme', 'comunicar', 'número', 'numero'];
   entidades.contacto = palabrasContacto.some(palabra => mensaje.includes(palabra));
   
   // Palabras clave para detectar intención sobre citas
-  const palabrasCitas = ['cita', 'agendar', 'programar', 'consulta', 'reservar', 'visita', 'acudir'];
+  const palabrasCitas = ['cita', 'agendar', 'programar', 'consulta', 'reservar', 'visita', 'acudir', 'turno', 'agenda', 'sacar cita', 'hacer cita', 'solicitar cita', 'consultar cita', 'mi cita', 'tengo cita'];
   entidades.citas = palabrasCitas.some(palabra => mensaje.includes(palabra));
   
   // Palabras clave para detectar intención sobre información educativa
-  const palabrasEducativo = ['consejo', 'consejos', 'recomendacion', 'alimentacion', 'prevencion', 'cuidado', 'mitos'];
+  const palabrasEducativo = ['consejo', 'consejos', 'recomendacion', 'recomendación', 'alimentacion', 'alimentación', 'prevencion', 'prevención', 'cuidado', 'mitos', 'cepillado', 'hilo dental', 'enjuague'];
   entidades.educativo = palabrasEducativo.some(palabra => mensaje.includes(palabra));
   
   // Palabras clave para detectar intención sobre post-tratamiento
-  const palabrasPostTratamiento = ['despues', 'después', 'posterior', 'recuperacion', 'sangrado', 'hinchazón', 'dolor'];
+  const palabrasPostTratamiento = ['despues', 'después', 'posterior', 'recuperacion', 'recuperación', 'sangrado', 'hinchazón', 'dolor', 'inflamación', 'inflamacion', 'cuidados', 'recomendaciones post'];
   entidades.postTratamiento = palabrasPostTratamiento.some(palabra => mensaje.includes(palabra));
   
   // Palabras clave para detectar intención sobre pagos
-  const palabrasPago = ['pago', 'precio', 'costo', 'tarjeta', 'efectivo', 'transferencia', 'valor', 'cuanto cuesta'];
+  const palabrasPago = ['pago', 'precio', 'costo', 'tarjeta', 'efectivo', 'transferencia', 'valor', 'cuanto cuesta', 'cuánto cuesta', 'cuánto vale', 'cuanto vale', 'tarifa', 'promoción', 'promocion', 'descuento', 'cobran', '$', 'pesos', 'mxn'];
   entidades.pago = palabrasPago.some(palabra => mensaje.includes(palabra));
   
   // Palabras clave para detectar intención sobre redes sociales
-  const palabrasRedes = ['redes', 'facebook', 'instagram', 'twitter', 'tiktok', 'youtube', 'siguenos', 'social'];
+  const palabrasRedes = ['redes', 'facebook', 'instagram', 'twitter', 'tiktok', 'youtube', 'siguenos', 'social', 'página', 'pagina', 'fanpage', 'perfil', 'síguenos', 'siguenos'];
   entidades.redes = palabrasRedes.some(palabra => mensaje.includes(palabra));
   
   // Palabras clave para detectar intención sobre información legal
-  const palabrasLegal = ['legal', 'politica', 'privacidad', 'terminos', 'condiciones', 'deslinde', 'responsabilidad'];
+  const palabrasLegal = ['legal', 'politica', 'política', 'privacidad', 'terminos', 'términos', 'condiciones', 'deslinde', 'responsabilidad', 'derechos', 'obligaciones', 'aviso legal'];
   entidades.legal = palabrasLegal.some(palabra => mensaje.includes(palabra));
   
   // Palabras clave para detectar intención sobre información de la empresa
-  const palabrasEmpresa = ['empresa', 'clinica', 'historia', 'mision', 'vision', 'valores', 'quienes son', 'acerca'];
+  const palabrasEmpresa = ['empresa', 'clinica', 'clínica', 'historia', 'mision', 'misión', 'vision', 'visión', 'valores', 'quienes son', 'acerca', 'servicios', 'equipo', 'doctor', 'doctores', 'especialistas', 'odontólogos', 'odontologos', 'dentistas'];
   entidades.empresa = palabrasEmpresa.some(palabra => mensaje.includes(palabra));
   
   return entidades;
@@ -355,9 +637,12 @@ function extraerEntidades(mensaje) {
 // Extrae nombres de tratamientos dentales del mensaje
 async function extraerTratamientos(mensaje) {
   try {
+    // Palabras comunes en mensajes que no son nombres de tratamientos
+    const palabrasComunes = ['hola', 'necesito', 'quiero', 'quisiera', 'informacion', 'información', 'sobre', 'para', 'tengo', 'hay', 'hacer', 'costo', 'precio', 'necesitaría', 'necesitaria', 'ofrecen', 'tienen', 'realizan', 'servicio', 'tratamiento', 'pueden'];
+    
     // Primero, obtenemos todos los servicios de la base de datos
     const query = `
-      SELECT id, title, description, category 
+      SELECT id, title, LOWER(title) as title_lower, description, category 
       FROM servicios
       ORDER BY title
     `;
@@ -373,19 +658,29 @@ async function extraerTratamientos(mensaje) {
     
     for (const servicio of servicios) {
       // Generar alternativas desde el título y descripción
-      const palabrasClaveTitle = servicio.title.toLowerCase().split(/\s+/);
+      const palabrasClaveTitle = servicio.title_lower.split(/\s+/)
+        .filter(p => p.length > 3 && !palabrasComunes.includes(p));
+        
       const palabrasClaveDesc = servicio.description 
-        ? servicio.description.toLowerCase().split(/\s+/).filter(p => p.length > 3)
+        ? servicio.description.toLowerCase().split(/\s+/)
+            .filter(p => p.length > 3 && !palabrasComunes.includes(p))
         : [];
       
       // Unir alternativas y eliminar duplicados
       const alternativas = [...new Set([...palabrasClaveTitle, ...palabrasClaveDesc])];
       
+      // Agregar sinónimos específicos del sector dental
+      let sinonimos = [];
+      alternativas.forEach(alt => {
+        const sinonimosPalabra = expandirSinonimos(alt);
+        sinonimos = [...sinonimos, ...sinonimosPalabra];
+      });
+      
       catalogoTratamientos.push({
         id: servicio.id,
-        nombre: servicio.title.toLowerCase(),
+        nombre: servicio.title_lower,
         categoria: servicio.category,
-        alternativas: alternativas.filter(a => a.length > 3 && a !== servicio.title.toLowerCase())
+        alternativas: [...new Set([...alternativas, ...sinonimos])].filter(a => a !== servicio.title_lower)
       });
     }
     
@@ -396,11 +691,12 @@ async function extraerTratamientos(mensaje) {
       if (mensaje.includes(tratamiento.nombre)) {
         tratamientosEncontrados.push(tratamiento.nombre);
       } else {
-        for (const alternativa of tratamiento.alternativas) {
-          if (mensaje.includes(alternativa)) {
-            tratamientosEncontrados.push(tratamiento.nombre);
-            break;
-          }
+        const encontrado = tratamiento.alternativas.some(alternativa => 
+          mensaje.includes(alternativa) && alternativa.length > 3
+        );
+        
+        if (encontrado && !tratamientosEncontrados.includes(tratamiento.nombre)) {
+          tratamientosEncontrados.push(tratamiento.nombre);
         }
       }
     });
@@ -413,14 +709,19 @@ async function extraerTratamientos(mensaje) {
       {nombre: "limpieza dental", alternativas: ["limpieza", "profilaxis", "higiene"]},
       {nombre: "consulta general", alternativas: ["revision", "chequeo", "evaluacion"]},
       {nombre: "curetaje", alternativas: ["limpieza profunda", "raspado"]},
-      {nombre: "asesoría sobre diseño de sonrisa", alternativas: ["diseño", "sonrisa"]},
-      {nombre: "cirugía estética de encía", alternativas: ["cirugia", "encia"]},
+      {nombre: "diseño de sonrisa", alternativas: ["diseño", "sonrisa"]},
+      {nombre: "cirugía de encía", alternativas: ["cirugia", "encia"]},
       {nombre: "obturación con resina", alternativas: ["obturacion", "resina", "empaste"]},
-      {nombre: "incrustación estética y de metal", alternativas: ["incrustacion", "metal"]},
-      {nombre: "coronas fijas estéticas o de metal", alternativas: ["corona", "fija"]},
-      {nombre: "placas removibles parciales", alternativas: ["placa", "parcial", "removible"]},
-      {nombre: "placas totales removibles", alternativas: ["placa", "total"]},
-      {nombre: "guardas dentales", alternativas: ["guarda", "protector"]}
+      {nombre: "incrustación", alternativas: ["incrustacion", "metal"]},
+      {nombre: "coronas", alternativas: ["corona", "fija"]},
+      {nombre: "placas removibles", alternativas: ["placa", "parcial", "removible"]},
+      {nombre: "placas totales", alternativas: ["placa", "total"]},
+      {nombre: "guardas dentales", alternativas: ["guarda", "protector"]},
+      {nombre: "endodoncia", alternativas: ["tratamiento de conducto", "nervio", "conducto"]},
+      {nombre: "extracción", alternativas: ["extraer", "sacar muela", "quitar diente"]},
+      {nombre: "implantes", alternativas: ["implante", "implantes dentales", "diente artificial"]},
+      {nombre: "ortodoncia", alternativas: ["brackets", "frenos", "aparatos"]},
+      {nombre: "blanqueamiento", alternativas: ["blanquear", "dientes blancos", "aclarar dientes"]}
     ];
     
     const tratamientosEncontrados = [];
@@ -443,10 +744,13 @@ async function extraerTratamientos(mensaje) {
   }
 }
 
-// Busca una intención que coincida con el mensaje del usuario
-async function buscarIntencion(mensaje) {
+// Mejora la búsqueda de intención con un enfoque más estadístico
+async function buscarIntencionMejorada(mensaje) {
   try {
-    // 1. Primero, intentar con coincidencias exactas de patrones completos
+    // Dividir el mensaje en tokens
+    const tokens = mensaje.split(/\s+/).filter(t => t.length > 2);
+    
+    // 1. Búsqueda por coincidencia exacta
     const queryExacta = `
       SELECT * FROM chatbot 
       WHERE patron = ?
@@ -461,73 +765,63 @@ async function buscarIntencion(mensaje) {
       return intencionesExactas[0];
     }
     
-    // 2. Si no hay coincidencia exacta, buscar patrones que estén contenidos
-    const queryContenido = `
-      SELECT *, 
-             (LENGTH(patron) / LENGTH(?)) as relevancia
-      FROM chatbot 
-      WHERE ? LIKE CONCAT('%', patron, '%') 
-      ORDER BY prioridad DESC, relevancia DESC, LENGTH(patron) DESC
+    // 2. Búsqueda estadística optimizada
+    const queryPuntuacion = `
+      SELECT c.*, 
+        (
+          CASE
+            WHEN c.patron = ? THEN 100
+            WHEN ? LIKE CONCAT('%', c.patron, '%') THEN 75
+            WHEN CONCAT(' ', ?, ' ') LIKE CONCAT('% ', c.patron, ' %') THEN 70
+            ELSE (
+              SELECT COUNT(*) * 10 FROM (
+                SELECT UNNEST(?) AS token
+              ) AS tokens
+              WHERE CONCAT(' ', c.patron, ' ') LIKE CONCAT('% ', token, ' %')
+            )
+          END
+        ) AS puntuacion
+      FROM chatbot c
+      HAVING puntuacion > 0
+      ORDER BY puntuacion DESC, c.prioridad DESC
       LIMIT 1
     `;
     
-    const intencionesContenido = await executeQuery(queryContenido, [mensaje, mensaje]);
+    // Preparar array de tokens para la consulta
+    const tokensParam = JSON.stringify(tokens);
     
-    if (intencionesContenido.length > 0 && intencionesContenido[0].relevancia > 0.3) {
-      logger.debug(`Intención encontrada (patrón contenido): ${intencionesContenido[0].patron}`);
-      return intencionesContenido[0];
+    const intenciones = await executeQuery(
+      queryPuntuacion,
+      [mensaje, mensaje, mensaje, tokensParam]
+    );
+    
+    if (intenciones.length > 0 && intenciones[0].puntuacion >= 30) {
+      logger.debug(`Intención encontrada (puntuación: ${intenciones[0].puntuacion}): ${intenciones[0].patron}`);
+      return intenciones[0];
     }
     
-    // 3. Buscar si el mensaje contiene algún patrón
-    const queryInversa = `
-      SELECT *,
-             (LENGTH(patron) / LENGTH(?)) as relevancia
-      FROM chatbot 
-      WHERE CONCAT(' ', ?, ' ') LIKE CONCAT('% ', patron, ' %')
-      ORDER BY prioridad DESC, LENGTH(patron) DESC
-      LIMIT 1
-    `;
-    
-    const intencionesInversas = await executeQuery(queryInversa, [mensaje, mensaje]);
-    
-    if (intencionesInversas.length > 0) {
-      logger.debug(`Intención encontrada (mensaje contiene patrón): ${intencionesInversas[0].patron}`);
-      return intencionesInversas[0];
-    }
-    
-    // 4. Búsqueda optimizada por palabras clave del mensaje
+    // 3. Búsqueda por palabras clave del mensaje con umbral mejorado
     const queryPalabras = `
       SELECT c.*, COUNT(*) as coincidencias
-      FROM chatbot c
-      JOIN (
-        SELECT DISTINCT palabra
-        FROM (
-          SELECT SUBSTRING_INDEX(SUBSTRING_INDEX(?, ' ', n.digit+1), ' ', -1) AS palabra
-          FROM (
-            SELECT 0 as digit UNION ALL SELECT 1 UNION ALL SELECT 2 UNION ALL 
-            SELECT 3 UNION ALL SELECT 4 UNION ALL SELECT 5 UNION ALL 
-            SELECT 6 UNION ALL SELECT 7 UNION ALL SELECT 8 UNION ALL SELECT 9
-          ) n
-          WHERE n.digit < LENGTH(?) - LENGTH(REPLACE(?, ' ', '')) + 1
-          AND LENGTH(SUBSTRING_INDEX(SUBSTRING_INDEX(?, ' ', n.digit+1), ' ', -1)) > 3
-        ) palabras
-      ) p ON CONCAT(' ', c.patron, ' ') LIKE CONCAT('% ', p.palabra, ' %')
+      FROM chatbot c, JSON_TABLE(?, '$[*]' COLUMNS(token VARCHAR(50) PATH '$')) AS t
+      WHERE CONCAT(' ', c.patron, ' ') LIKE CONCAT('% ', t.token, ' %')
       GROUP BY c.id
+      HAVING coincidencias >= 2
       ORDER BY coincidencias DESC, c.prioridad DESC
       LIMIT 1
     `;
     
     const intencionesPalabras = await executeQuery(
       queryPalabras, 
-      [mensaje, mensaje, mensaje, mensaje]
+      [tokensParam]
     );
     
-    if (intencionesPalabras.length > 0 && intencionesPalabras[0].coincidencias >= 2) {
-      logger.debug(`Intención encontrada (coincidencia palabras): ${intencionesPalabras[0].patron}`);
+    if (intencionesPalabras.length > 0) {
+      logger.debug(`Intención encontrada (coincidencias por palabras: ${intencionesPalabras[0].coincidencias}): ${intencionesPalabras[0].patron}`);
       return intencionesPalabras[0];
     }
     
-    // 5. Búsqueda por categoría basada en entidades detectadas
+    // 4. Búsqueda por categoría basada en entidades detectadas
     const entidades = extraerEntidades(mensaje);
     let categoria = null;
     
@@ -551,7 +845,7 @@ async function buscarIntencion(mensaje) {
       const intencionesCategoria = await executeQuery(queryCategoria, [categoria]);
       
       if (intencionesCategoria.length > 0) {
-        logger.debug(`Intención encontrada (por categoría): ${intencionesCategoria[0].patron}`);
+        logger.debug(`Intención encontrada (por categoría ${categoria}): ${intencionesCategoria[0].patron}`);
         return intencionesCategoria[0];
       }
     }
@@ -571,6 +865,47 @@ async function generarRespuesta(intencion, mensaje, entidades, contexto = {}) {
   try {
     // 1. Verificar si la intención requiere una consulta a la base de datos
     let datosConsulta = null;
+    
+    // Verificar primero casos con mayor prioridad para respuestas más específicas
+    
+    // Caso 1: Consulta de horario de día específico
+    if (entidades.horarios && entidades.dia_especifico) {
+      const horarioDia = await consultarHorarioPorDia(entidades.dia_especifico);
+      
+      if (!horarioDia.error) {
+        return {
+          respuesta: `Los horarios de atención para el día ${horarioDia.dia} son: ${horarioDia.texto_horarios}.`,
+          tipo: "Horario",
+          subtipo: "dia_especifico",
+          datos: horarioDia,
+          entidades
+        };
+      } else {
+        return {
+          respuesta: horarioDia.error,
+          tipo: "Horario",
+          subtipo: "dia_no_disponible",
+          datos: horarioDia,
+          entidades
+        };
+      }
+    }
+    
+    // Caso 2: Consulta sobre tratamiento específico con precio
+    if (entidades.tratamientos.length > 0 && entidades.pago) {
+      const tratamiento = entidades.tratamientos[0];
+      const datoTratamiento = await consultarTratamiento(tratamiento);
+      
+      if (datoTratamiento && !datoTratamiento.error) {
+        return {
+          respuesta: `El precio del tratamiento de ${datoTratamiento.nombre} es de $${datoTratamiento.precio} MXN.`,
+          tipo: "Precios",
+          subtipo: "precio_especifico",
+          datos: datoTratamiento,
+          entidades
+        };
+      }
+    }
     
     // Si hay tratamientos específicos mencionados, priorizarlos en la consulta
     const hayTratamientoEspecifico = entidades.tratamientos && 
@@ -623,7 +958,10 @@ async function generarRespuesta(intencion, mensaje, entidades, contexto = {}) {
       }
     }
     
-    // 4. Devolver respuesta formateada
+    // 4. Personalizar respuesta según combinaciones específicas de entidades
+    respuestaFinal = personalizarRespuestaSegunEntidades(respuestaFinal, entidades, datosConsulta);
+    
+    // 5. Devolver respuesta formateada
     return {
       respuesta: respuestaFinal,
       tipo: intencion.categoria,
@@ -638,6 +976,40 @@ async function generarRespuesta(intencion, mensaje, entidades, contexto = {}) {
   }
 }
 
+// Personaliza la respuesta según combinaciones específicas de entidades
+function personalizarRespuestaSegunEntidades(respuesta, entidades, datos) {
+  // Caso 1: Si se consulta por un tratamiento específico y sus horarios
+  if (entidades.tratamientos.length > 0 && entidades.horarios && datos && datos.nombre) {
+    const nombreTratamiento = datos.nombre || datos.servicio || entidades.tratamientos[0];
+    
+    // Si la respuesta ya incluye esta información, no modificarla
+    if (respuesta.includes(nombreTratamiento) && respuesta.includes("horario")) {
+      return respuesta;
+    }
+    
+    return `${respuesta} Para agendar una cita para ${nombreTratamiento}, puedes contactarnos en nuestro horario de atención.`;
+  }
+  
+  // Caso 2: Si se consulta por un tratamiento y su duración específica
+  if (entidades.tratamientos.length > 0 && datos && datos.duracion && 
+      !respuesta.includes("duración") && !respuesta.includes("duración")) {
+    
+    const nombreTratamiento = datos.nombre || datos.servicio || entidades.tratamientos[0];
+    const duracionInfo = datos.duracion || "variable según el caso";
+    
+    return `${respuesta} El tiempo aproximado para el tratamiento de ${nombreTratamiento} es ${duracionInfo}.`;
+  }
+  
+  // Caso 3: Añadir recomendación sobre citas en consultas específicas
+  if ((entidades.tratamientos.length > 0 || entidades.pago) && 
+      !entidades.citas && !respuesta.includes("cita") && !respuesta.includes("agendar")) {
+    
+    return `${respuesta} Te recomendamos agendar una cita para una evaluación personalizada.`;
+  }
+  
+  return respuesta;
+}
+
 // Verifica si existe un valor por defecto para una variable
 function tieneValorPorDefecto(datos, variable) {
   // Mapeo de variables a posibles alternativas
@@ -646,7 +1018,7 @@ function tieneValorPorDefecto(datos, variable) {
     'duracion': ['duration', 'tiempo', 'minutos'],
     'horarios': ['horario', 'horas_atencion'],
     'redes': ['redes_sociales', 'redes_lista'],
-    'direccion': ['calle_numero', 'ubicacion', 'domicilio'],
+    'direccion': ['calle_numero', 'ubicacion', 'domicilio', 'direccion_completa'],
     'telefono': ['telefono_principal', 'contacto', 'celular'],
     'precio': ['price', 'costo', 'valor'],
     'descripcion': ['description', 'detalle', 'informacion'],
@@ -666,6 +1038,10 @@ async function realizarConsultaSegunCategoria(intencion, mensaje, entidades) {
   try {
     switch (intencion.categoria) {
       case 'Horario':
+        // Si hay un día específico mencionado, consultar ese día
+        if (entidades.dia_especifico) {
+          return await consultarHorarioPorDia(entidades.dia_especifico);
+        }
         return await consultarHorarios();
       
       case 'Contacto':
@@ -684,7 +1060,7 @@ async function realizarConsultaSegunCategoria(intencion, mensaje, entidades) {
       case 'Precios':
         if (entidades.tratamientos && entidades.tratamientos.length > 0) {
           const infoTratamiento = await consultarTratamiento(entidades.tratamientos[0]);
-          if (infoTratamiento) {
+          if (infoTratamiento && !infoTratamiento.error) {
             return {
               servicio: infoTratamiento.servicio || infoTratamiento.nombre,
               precio: infoTratamiento.precio || infoTratamiento.price,
@@ -776,6 +1152,11 @@ async function consultarContacto() {
     // Obtener también redes sociales para complementar
     const redes = await consultarRedesSociales();
     
+    // Formatear dirección completa
+    if (resultado[0].calle_numero && resultado[0].localidad) {
+      resultado[0].direccion_completa = `${resultado[0].calle_numero}, ${resultado[0].localidad}, ${resultado[0].municipio || ''}, ${resultado[0].estado || ''}${resultado[0].codigo_postal ? ', C.P. ' + resultado[0].codigo_postal : ''}`.replace(/,\s+,/g, ',').replace(/,\s+$/g, '');
+    }
+    
     return {
       ...resultado[0],
       redes: redes.redes || null,
@@ -813,6 +1194,134 @@ function seleccionarRespuestaAleatoria(respuestasStr) {
     logger.error(`Error al seleccionar respuesta aleatoria: ${error.message}`);
     return "Lo siento, ocurrió un error al procesar la respuesta.";
   }
+}
+
+// Consulta horarios por día específico
+async function consultarHorarioPorDia(dia) {
+  try {
+    // Normalizar el día
+    const diaNormalizado = normalizarDia(dia);
+    
+    // Validar que sea un día válido
+    const diasValidos = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+    
+    if (!diasValidos.includes(diaNormalizado) && diaNormalizado !== 'fin_semana') {
+      return { 
+        error: `Día no válido. Debe ser uno de: ${diasValidos.join(", ")}`,
+        dia: diaNormalizado
+      };
+    }
+    
+    // Caso especial para fin de semana
+    if (diaNormalizado === 'fin_semana') {
+      const sabado = await consultarHorarioPorDia('Sábado');
+      const domingo = await consultarHorarioPorDia('Domingo');
+      
+      let mensaje = "";
+      
+      if (!sabado.error) {
+        mensaje += `Sábado: ${sabado.texto_horarios}. `;
+      } else {
+        mensaje += "No atendemos los sábados. ";
+      }
+      
+      if (!domingo.error) {
+        mensaje += `Domingo: ${domingo.texto_horarios}`;
+      } else {
+        mensaje += "No atendemos los domingos.";
+      }
+      
+      return {
+        dia: "Fin de semana",
+        texto_horarios: mensaje,
+        sabado: sabado,
+        domingo: domingo
+      };
+    }
+    
+    const query = `
+      SELECT h.*, e.nombre as nombre_empleado 
+      FROM horarios h
+      LEFT JOIN empleados e ON h.empleado_id = e.id
+      WHERE h.dia_semana = ?
+      ORDER BY h.hora_inicio
+    `;
+    
+    const horarios = await executeQuery(query, [diaNormalizado]);
+    
+    if (horarios.length === 0) {
+      return {
+        error: `No atendemos los ${diaNormalizado.toLowerCase()}`,
+        dia: diaNormalizado,
+        horarios: []
+      };
+    }
+    
+    // Formatear horarios para este día
+    const horariosFormateados = horarios.map(h => {
+      const horaInicio = h.hora_inicio?.substring(0, 5) || '';
+      const horaFin = h.hora_fin?.substring(0, 5) || '';
+      
+      return {
+        horario: `${horaInicio} - ${horaFin}`,
+        empleado: h.nombre_empleado || 'General',
+        duracion: h.duracion || 0
+      };
+    });
+    
+    // Generar texto específico para este día
+    const textoHorarios = horariosFormateados
+      .map(h => h.horario)
+      .filter((v, i, a) => a.indexOf(v) === i) // Eliminar duplicados
+      .join(", ");
+    
+    return {
+      dia: diaNormalizado,
+      horarios: horariosFormateados,
+      texto_horarios: textoHorarios
+    };
+    
+  } catch (error) {
+    logger.error(`Error al consultar horario por día: ${error.message}`);
+    return { 
+      error: `No pudimos obtener información para el día ${dia}`,
+      dia: dia
+    };
+  }
+}
+
+// Normaliza el nombre del día
+function normalizarDia(dia) {
+  if (dia === 'fin_semana') return dia;
+  
+  // Mapeo de posibles variaciones
+  const mapDias = {
+    'lun': 'Lunes',
+    'mar': 'Martes',
+    'mie': 'Miércoles',
+    'jue': 'Jueves',
+    'vie': 'Viernes',
+    'sab': 'Sábado',
+    'dom': 'Domingo',
+    'fin de semana': 'fin_semana',
+    'fines de semana': 'fin_semana',
+    'sabados y domingos': 'fin_semana',
+    'sábados y domingos': 'fin_semana'
+  };
+  
+  // Verificar si es un nombre corto
+  if (mapDias[dia.toLowerCase()]) {
+    return mapDias[dia.toLowerCase()];
+  }
+  
+  // Normalizar primera letra mayúscula
+  const diaNormalizado = dia.charAt(0).toUpperCase() + dia.slice(1).toLowerCase();
+  
+  // Correcciones específicas
+  if (diaNormalizado === 'Sabado') return 'Sábado';
+  if (diaNormalizado === 'Miercoles') return 'Miércoles';
+  
+  return diaNormalizado;
 }
 
 // Consulta los horarios disponibles
@@ -954,8 +1463,16 @@ async function consultarCitasPaciente(identificador) {
     const citasFormateadas = citas.map(cita => {
       // Formatear fecha y hora para presentación
       const fecha = new Date(cita.fecha_consulta);
-      const fechaStr = fecha.toLocaleDateString('es-MX');
-      const horaStr = fecha.toLocaleTimeString('es-MX', { hour: '2-digit', minute: '2-digit' });
+      const fechaStr = fecha.toLocaleDateString('es-MX', {
+        day: '2-digit', 
+        month: '2-digit', 
+        year: 'numeric'
+      });
+      
+      const horaStr = fecha.toLocaleTimeString('es-MX', { 
+        hour: '2-digit', 
+        minute: '2-digit' 
+      });
       
       return {
         id: cita.id,
@@ -1230,42 +1747,61 @@ async function consultarTratamiento(nombreTratamiento) {
       return { error: "No se especificó ningún tratamiento" };
     }
     
+    // Aplicar correcciones ortográficas y mejorar la búsqueda
+    const nombreCorregido = corregirErroresOrtograficos(nombreTratamiento);
+    
+    // Incorporar sinónimos para ampliar búsqueda
+    const sinonimos = expandirSinonimos(nombreCorregido);
+    const condicionesBusqueda = [
+      `title = '${nombreCorregido}'`, 
+      `title LIKE '%${nombreCorregido}%'`,
+      `description LIKE '%${nombreCorregido}%'`
+    ];
+    
+    // Agregar sinónimos a la búsqueda
+    sinonimos.forEach(sinonimo => {
+      condicionesBusqueda.push(`title LIKE '%${sinonimo}%'`);
+      condicionesBusqueda.push(`description LIKE '%${sinonimo}%'`);
+    });
+    
     // Consulta principal para encontrar el tratamiento
     const query = `
       SELECT s.id, s.title, s.description, s.duration, s.category, s.price, s.image_url,
              CASE 
                WHEN s.category IN ('Periodoncia', 'Ortodoncia', 'Cirugía') THEN TRUE
                ELSE FALSE
-             END as es_tratamiento
+             END as es_tratamiento,
+             CASE
+               WHEN s.title = ? THEN 100
+               WHEN s.title LIKE ? THEN 80
+               WHEN s.description LIKE ? THEN 60
+               ELSE (
+                 SELECT COUNT(*) * 10 FROM (
+                   SELECT unnest(ARRAY[${sinonimos.map(() => '?').join(', ')}]) AS term
+                 ) AS terms
+                 WHERE s.title LIKE CONCAT('%', term, '%') OR s.description LIKE CONCAT('%', term, '%')
+               )
+             END as relevancia
       FROM servicios s
-      WHERE s.title LIKE ? OR s.description LIKE ? OR s.title LIKE ? OR s.description LIKE ?
-      ORDER BY CASE 
-               WHEN s.title = ? THEN 0 
-               WHEN s.title LIKE ? THEN 1
-               WHEN s.title LIKE ? THEN 2
-               ELSE 3 
-               END,
-               LENGTH(s.title) ASC
+      WHERE ${condicionesBusqueda.join(' OR ')}
+      HAVING relevancia > 0
+      ORDER BY relevancia DESC, LENGTH(s.title) ASC
       LIMIT 1
     `;
     
-    // Varios patrones para mejorar la búsqueda
-    const servicios = await executeQuery(
-      query, 
-      [
-        nombreTratamiento, 
-        `%${nombreTratamiento}%`,
-        `%${nombreTratamiento}`,
-        `${nombreTratamiento}%`,
-        nombreTratamiento,
-        `${nombreTratamiento}%`,
-        `%${nombreTratamiento}`
-      ]
-    );
+    // Preparar parámetros para la consulta
+    const params = [
+      nombreCorregido, 
+      `%${nombreCorregido}%`,
+      `%${nombreCorregido}%`,
+      ...sinonimos
+    ];
+    
+    const servicios = await executeQuery(query, params);
     
     if (servicios.length === 0) {
       // Si no encuentra el tratamiento, realizar una búsqueda más flexible por palabras clave
-      const palabrasClaves = nombreTratamiento.split(/\s+/).filter(p => p.length > 3);
+      const palabrasClaves = nombreCorregido.split(/\s+/).filter(p => p.length > 3);
       
       if (palabrasClaves.length > 0) {
         let queryPalabras = `
@@ -1588,10 +2124,9 @@ function obtieneAlternativasVariable(variable) {
     'redes': ['redes_sociales', 'redes_lista'],
     'direccion': ['calle_numero', 'ubicacion', 'domicilio', 'direccion_completa'],
     'telefono': ['telefono_principal', 'contacto', 'celular'],
-    'descripcion': ['description', 'contenido', 'detalle'],
-    'categoria': ['category', 'tipo'],
-    'contenido': ['descripcion', 'description', 'texto'],
-    'precio': ['price', 'costo', 'valor']
+    'precio': ['price', 'costo', 'valor'],
+    'descripcion': ['description', 'detalle', 'informacion'],
+    'contenido': ['texto', 'body', 'info']
   };
   
   return alternativas[variable] || [];
@@ -1741,44 +2276,6 @@ router.get("/tratamientos", async (req, res) => {
   }
 });
 
-// Consulta tratamientos por categoría
-async function consultarTratamientosPorCategoria(categoria) {
-  try {
-    const query = `
-      SELECT id, title, description, category, duration, price, image_url
-      FROM servicios
-      WHERE category = ?
-      ORDER BY title
-    `;
-    
-    const servicios = await executeQuery(query, [categoria]);
-    
-    if (servicios.length === 0) {
-      return { 
-        error: `No se encontraron tratamientos en la categoría ${categoria} en la base de datos`,
-        servicios: [],
-        categoria: categoria,
-        total: 0
-      };
-    }
-    
-    return {
-      servicios: servicios,
-      categoria: categoria,
-      total: servicios.length
-    };
-    
-  } catch (error) {
-    logger.error(`Error al consultar tratamientos por categoría: ${error.message}`);
-    return {
-      error: "Error en la consulta a la base de datos para obtener tratamientos por categoría",
-      servicios: [],
-      categoria: categoria,
-      total: 0
-    };
-  }
-}
-
 // Endpoint para obtener detalles de un tratamiento
 router.get("/tratamiento", async (req, res) => {
   try {
@@ -1809,57 +2306,6 @@ router.get("/tratamiento", async (req, res) => {
     });
   }
 });
-
-// Consulta tratamiento por ID
-async function consultarTratamientoPorId(id) {
-  try {
-    const query = `
-      SELECT s.id, s.title, s.description, s.duration, s.category, s.price, s.image_url
-      FROM servicios s
-      WHERE s.id = ?
-      LIMIT 1
-    `;
-    
-    const servicios = await executeQuery(query, [id]);
-    
-    if (servicios.length === 0) {
-      return { 
-        error: `No se encontró el tratamiento con ID ${id} en la base de datos`
-      };
-    }
-    
-    const servicio = servicios[0];
-    
-    // Consultar detalles adicionales
-    const queryDetalles = `
-      SELECT * FROM servicio_detalles
-      WHERE servicio_id = ?
-    `;
-    
-    const detalles = await executeQuery(queryDetalles, [servicio.id]);
-    
-    // Asignar campos para facilitar el uso con plantillas
-    return {
-      id: servicio.id,
-      servicio: servicio.title,
-      nombre: servicio.title,
-      duracion: servicio.duration || "Consultar",
-      precio: servicio.price || "Consultar",
-      categoria: servicio.category,
-      descripcion: servicio.description,
-      detalles: detalles,
-      beneficios: obtenerDetallesPorTipo(detalles, 'beneficio'),
-      incluye: obtenerDetallesPorTipo(detalles, 'incluye'),
-      precauciones: obtenerDetallesPorTipo(detalles, 'precaucion')
-    };
-    
-  } catch (error) {
-    logger.error(`Error al consultar tratamiento por ID: ${error.stack}`);
-    return { 
-      error: "Error en la consulta a la base de datos para obtener detalles del tratamiento"
-    };
-  }
-}
 
 // Endpoint para obtener horarios
 router.get("/horarios", async (req, res) => {
@@ -1893,87 +2339,6 @@ router.get("/horarios", async (req, res) => {
     });
   }
 });
-
-// Consulta horarios de un día específico
-async function consultarHorarioPorDia(dia) {
-  try {
-    // Normalizar el día (primera letra mayúscula, resto minúsculas)
-    const diaNormalizado = dia.charAt(0).toUpperCase() + dia.slice(1).toLowerCase();
-    
-    // Mapeo de posibles variaciones
-    const mapDias = {
-      'lun': 'Lunes',
-      'mar': 'Martes',
-      'mie': 'Miércoles',
-      'jue': 'Jueves',
-      'vie': 'Viernes',
-      'sab': 'Sábado',
-      'dom': 'Domingo'
-    };
-    
-    // Obtener el día completo si es una abreviatura
-    const diaConsulta = mapDias[diaNormalizado.substring(0, 3)] || diaNormalizado;
-    
-    // Validar que sea un día válido
-    const diasValidos = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
-    
-    if (!diasValidos.includes(diaConsulta)) {
-      return { 
-        error: "Día no válido. Debe ser uno de: " + diasValidos.join(", "),
-        dia: diaNormalizado
-      };
-    }
-    
-    const query = `
-      SELECT h.*, e.nombre as nombre_empleado 
-      FROM horarios h
-      LEFT JOIN empleados e ON h.empleado_id = e.id
-      WHERE h.dia_semana = ?
-      ORDER BY h.hora_inicio
-    `;
-    
-    const horarios = await executeQuery(query, [diaConsulta]);
-    
-    if (horarios.length === 0) {
-      return {
-        error: `No se encontraron horarios para el día ${diaConsulta} en la base de datos`,
-        dia: diaConsulta,
-        horarios: []
-      };
-    }
-    
-    // Formatear horarios para este día
-    const horariosFormateados = horarios.map(h => {
-      const horaInicio = h.hora_inicio?.substring(0, 5) || '';
-      const horaFin = h.hora_fin?.substring(0, 5) || '';
-      
-      return {
-        horario: `${horaInicio} - ${horaFin}`,
-        empleado: h.nombre_empleado || 'General',
-        duracion: h.duracion || 0
-      };
-    });
-    
-    // Generar texto formateado
-    const textoHorarios = horariosFormateados
-      .map(h => h.horario)
-      .filter((v, i, a) => a.indexOf(v) === i) // Eliminar duplicados
-      .join(", ");
-    
-    return {
-      dia: diaConsulta,
-      horarios: horariosFormateados,
-      texto_horarios: `${diaConsulta}: ${textoHorarios}`
-    };
-    
-  } catch (error) {
-    logger.error(`Error al consultar horario por día: ${error.message}`);
-    return { 
-      error: `Error en la consulta a la base de datos para obtener horarios del día ${dia}`,
-      dia: dia
-    };
-  }
-}
 
 // Endpoint para obtener información de la empresa
 router.get("/perfil-empresa", async (req, res) => {
@@ -2197,7 +2562,7 @@ router.get("/diagnostico", async (req, res) => {
     // 5. Probar la función buscarIntencion
     let testIntencion = null;
     try {
-      testIntencion = await buscarIntencion("hola");
+      testIntencion = await buscarIntencionMejorada("hola");
     } catch (error) {
       testIntencion = { error: error.message };
     }
