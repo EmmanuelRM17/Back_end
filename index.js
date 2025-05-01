@@ -46,7 +46,7 @@ app.use(express.json());
 
 // Tus rutas existentes
 const userRoutes = require("./routes/userRoutes");
-const chatbot = require("./routes/chatbot.js");
+const chatbot = require("./routes/chatbot");
 const Registrer = require("./routes/registrer");
 const Citas = require("./routes/admin/citas")
 const Tratamientos = require("./routes/admin/tratamientos.js")
