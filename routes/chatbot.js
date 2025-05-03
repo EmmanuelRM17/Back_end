@@ -19,20 +19,18 @@ const executeQuery = (query, params = []) => {
   });
 };
 
-// Función para buscar patrones de saludo en la BD
-const buscarPatronSaludo = async (mensaje) => {
+// Función para buscar patrones en la BD - Modificada para buscar cualquier patrón
+const buscarPatron = async (mensaje) => {
   try {
     // Normalizar el mensaje (minúsculas, sin espacios extras)
     const mensajeNormalizado = mensaje.toLowerCase().trim();
     
-    // Consultar la tabla de chatbot para buscar coincidencias con saludos
+    // Consultar la tabla de chatbot para buscar coincidencias con cualquier patrón
     const query = `
       SELECT * FROM chatbot 
-      WHERE categoria = 'General' 
-      AND (
+      WHERE 
         patron = ? OR 
         ? LIKE CONCAT('%', patron, '%')
-      )
       ORDER BY prioridad DESC, LENGTH(patron) DESC
       LIMIT 1
     `;
@@ -46,7 +44,7 @@ const buscarPatronSaludo = async (mensaje) => {
     
     return null;
   } catch (error) {
-    logger.error(`Error al buscar patrón de saludo: ${error.message}`);
+    logger.error(`Error al buscar patrón: ${error.message}`);
     throw error;
   }
 };
@@ -63,7 +61,7 @@ const obtenerRespuestaAleatoria = (respuestas) => {
   return arrayRespuestas[indiceAleatorio];
 };
 
-// Función principal para procesar los mensajes
+// Función principal para procesar los mensajes - Modificada para manejar todos los tipos de patrones
 const procesarMensaje = async (mensaje, contexto) => {
   try {
     // Por defecto, preparamos una respuesta genérica
@@ -74,30 +72,32 @@ const procesarMensaje = async (mensaje, contexto) => {
       contexto: contexto || {}
     };
     
-    // Buscar si el mensaje es un saludo
-    const patronSaludo = await buscarPatronSaludo(mensaje);
+    // Buscar si el mensaje coincide con algún patrón
+    const patronEncontrado = await buscarPatron(mensaje);
     
-    if (patronSaludo) {
-      // Si encontramos un patrón de saludo, generamos una respuesta
-      const respuestaAleatoria = obtenerRespuestaAleatoria(patronSaludo.respuestas);
+    if (patronEncontrado) {
+      // Si encontramos un patrón, generamos una respuesta
+      const respuestaAleatoria = obtenerRespuestaAleatoria(patronEncontrado.respuestas);
       
       respuesta = {
         respuesta: respuestaAleatoria,
-        tipo: "General",
-        subtipo: "saludo",
+        tipo: patronEncontrado.categoria,
+        subtipo: patronEncontrado.patron, // Usamos el patrón como subtipo
         datos: {
-          patron_detectado: patronSaludo.patron,
-          prioridad: patronSaludo.prioridad
+          patron_detectado: patronEncontrado.patron,
+          prioridad: patronEncontrado.prioridad,
+          categoria: patronEncontrado.categoria
         },
         contexto: {
           ...contexto,
-          ultimo_patron: patronSaludo.patron
+          ultimo_patron: patronEncontrado.patron,
+          ultima_categoria: patronEncontrado.categoria
         }
       };
       
-      logger.info(`Saludo detectado: "${patronSaludo.patron}" - Respondiendo con saludo aleatorio`);
+      logger.info(`Patrón detectado: "${patronEncontrado.patron}" - Categoría: "${patronEncontrado.categoria}" - Respondiendo`);
     } else {
-      logger.info(`No se detectó saludo en el mensaje: "${mensaje.substring(0, 30)}..."`);
+      logger.info(`No se detectó patrón en el mensaje: "${mensaje.substring(0, 30)}..."`);
     }
     
     return respuesta;
@@ -157,14 +157,13 @@ router.post("/mensaje", async (req, res) => {
   }
 });
 
-// Endpoint adicional para obtener patrones de saludo disponibles (útil para pruebas)
+// Endpoint adicional para obtener patrones disponibles (útil para pruebas)
 router.get("/patrones", async (req, res) => {
   try {
     const query = `
       SELECT id, patron, categoria, prioridad 
       FROM chatbot 
-      WHERE categoria = 'General'
-      ORDER BY prioridad DESC, patron ASC
+      ORDER BY categoria, prioridad DESC, patron ASC
     `;
     
     const patrones = await executeQuery(query);
