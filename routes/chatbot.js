@@ -33,7 +33,7 @@ async function procesarMensaje(mensaje, contexto) {
 
       // Modifica esta línea
       const opcionesRespuesta = coincidencia.response.split("||");
-      // Seleccionar una respuesta aleatoria entre las disponibles
+            // Seleccionar una respuesta aleatoria entre las disponibles
       const indiceRandom = Math.floor(Math.random() * opcionesRespuesta.length);
       respuesta = opcionesRespuesta[indiceRandom].trim();
     } else {
