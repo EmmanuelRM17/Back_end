@@ -171,5 +171,4 @@ router.delete("/Pagos/:id", async (req, res) => {
   }
 });
 
-
 module.exports = router;

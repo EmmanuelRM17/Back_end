@@ -2,7 +2,7 @@ const express = require('express');
 const db = require('../../db');
 const router = express.Router();
 const logger = require('../../utils/logger');
-const xss = require('xss'); // Para sanitización de entradas
+const xss = require('xss');
 const moment = require('moment-timezone');
 
 router.post('/nueva', async (req, res) => {
@@ -924,6 +924,7 @@ router.put('/cancel/:id', async (req, res) => {
 });
 
 // Endpoint para actualizar solo el estado de una cita
+// Endpoint para actualizar solo el estado de una cita
 router.put('/updateStatus/:id', async (req, res) => {
     const { id } = req.params;
     const { estado, mensaje } = req.body;
@@ -1019,6 +1020,57 @@ router.put('/updateStatus/:id', async (req, res) => {
             notasActualizadas ? xss(notasActualizadas) : null,
             parseInt(id)
         ]);
+
+        // NUEVO: Si la cita se marca como "Completada", crear pago pendiente automáticamente
+        if (estado === 'Completada' && cita.paciente_id) {
+            try {
+                // Verificar si ya existe un pago para esta cita
+                const [pagoExistente] = await db.promise().query(
+                    'SELECT id FROM pagos WHERE cita_id = ?', 
+                    [parseInt(id)]
+                );
+
+                // Solo crear el pago si no existe uno ya
+                if (pagoExistente.length === 0) {
+                    const insertPagoQuery = `
+                        INSERT INTO pagos (
+                            paciente_id, cita_id, monto, subtotal, total,
+                            concepto, estado, fecha_creacion
+                        ) VALUES (?, ?, ?, ?, ?, ?, 'Pendiente', NOW())
+                    `;
+
+                    const concepto = `Pago por servicio: ${cita.servicio_nombre}`;
+                    const monto = parseFloat(cita.precio_servicio) || 0;
+
+                    await db.promise().query(insertPagoQuery, [
+                        cita.paciente_id,
+                        parseInt(id),
+                        monto,
+                        monto,
+                        monto,
+                        concepto
+                    ]);
+
+                    logger.info(`Pago pendiente creado automáticamente para cita ${id}, paciente ${cita.paciente_id}, monto: $${monto}`);
+                    
+                    // Agregar información del pago creado a la respuesta
+                    return res.json({
+                        message: `Estado de la cita actualizado correctamente a "${estado}". Se ha creado un pago pendiente de $${monto}.`,
+                        estado: estado,
+                        cita_id: parseInt(id),
+                        tratamiento_id: cita.tratamiento_id || null,
+                        pago_creado: true,
+                        monto_pendiente: monto
+                    });
+                } else {
+                    logger.info(`Cita ${id} completada, pero ya existe un pago asociado`);
+                }
+            } catch (pagoError) {
+                logger.error('Error al crear pago automático:', pagoError);
+                // No fallar la actualización de la cita por este error
+                // Continuar con la respuesta normal
+            }
+        }
 
         // 4. Si es una cita de tratamiento y se está completando, actualizar contador
         if (cita.tratamiento_id && estado === 'Completada') {
