@@ -924,7 +924,6 @@ router.put('/cancel/:id', async (req, res) => {
 });
 
 // Endpoint para actualizar solo el estado de una cita
-// Endpoint para actualizar solo el estado de una cita
 router.put('/updateStatus/:id', async (req, res) => {
     const { id } = req.params;
     const { estado, mensaje } = req.body;
@@ -1008,18 +1007,38 @@ router.put('/updateStatus/:id', async (req, res) => {
             ? (cita.notas ? `${cita.notas}\n\n[${new Date().toLocaleString()}] ${mensaje}` : mensaje)
             : cita.notas;
 
-        const updateQuery = `
-            UPDATE citas 
-            SET estado = ?, 
-                notas = ?
-            WHERE id = ?
-        `;
+        // CORREGIDO: Actualizar también el campo estado_pago cuando se completa la cita
+        let updateQuery;
+        let queryParams;
 
-        const result = await db.promise().query(updateQuery, [
-            xss(estado),
-            notasActualizadas ? xss(notasActualizadas) : null,
-            parseInt(id)
-        ]);
+        if (estado === 'Completada') {
+            updateQuery = `
+                UPDATE citas 
+                SET estado = ?, 
+                    estado_pago = 'Pendiente',
+                    notas = ?
+                WHERE id = ?
+            `;
+            queryParams = [
+                xss(estado),
+                notasActualizadas ? xss(notasActualizadas) : null,
+                parseInt(id)
+            ];
+        } else {
+            updateQuery = `
+                UPDATE citas 
+                SET estado = ?, 
+                    notas = ?
+                WHERE id = ?
+            `;
+            queryParams = [
+                xss(estado),
+                notasActualizadas ? xss(notasActualizadas) : null,
+                parseInt(id)
+            ];
+        }
+
+        const result = await db.promise().query(updateQuery, queryParams);
 
         // NUEVO: Si la cita se marca como "Completada", crear pago pendiente automáticamente
         if (estado === 'Completada' && cita.paciente_id) {
@@ -1035,8 +1054,8 @@ router.put('/updateStatus/:id', async (req, res) => {
                     const insertPagoQuery = `
                         INSERT INTO pagos (
                             paciente_id, cita_id, monto, subtotal, total,
-                            concepto, estado, fecha_creacion
-                        ) VALUES (?, ?, ?, ?, ?, ?, 'Pendiente', NOW())
+                            concepto, metodo_pago, estado, fecha_creacion
+                        ) VALUES (?, ?, ?, ?, ?, ?, NULL, 'Pendiente', NOW())
                     `;
 
                     const concepto = `Pago por servicio: ${cita.servicio_nombre}`;
@@ -1055,8 +1074,9 @@ router.put('/updateStatus/:id', async (req, res) => {
                     
                     // Agregar información del pago creado a la respuesta
                     return res.json({
-                        message: `Estado de la cita actualizado correctamente a "${estado}". Se ha creado un pago pendiente de $${monto}.`,
+                        message: `Estado de la cita actualizado a "${estado}" y estado de pago a "Pendiente". Se ha creado un pago pendiente de ${monto}.`,
                         estado: estado,
+                        estado_pago: 'Pendiente',
                         cita_id: parseInt(id),
                         tratamiento_id: cita.tratamiento_id || null,
                         pago_creado: true,
@@ -1080,12 +1100,20 @@ router.put('/updateStatus/:id', async (req, res) => {
         }
 
         // 5. Responder con éxito
-        res.json({
+        const response = {
             message: `Estado de la cita actualizado correctamente a "${estado}".`,
             estado: estado,
             cita_id: parseInt(id),
             tratamiento_id: cita.tratamiento_id || null
-        });
+        };
+
+        // Si se marcó como completada, incluir el estado_pago en la respuesta
+        if (estado === 'Completada') {
+            response.estado_pago = 'Pendiente';
+            response.message = `Estado de la cita actualizado a "${estado}" y estado de pago a "Pendiente".`;
+        }
+
+        res.json(response);
     } catch (error) {
         logger.error('Error en la actualización de estado de cita:', error);
         res.status(500).json({
