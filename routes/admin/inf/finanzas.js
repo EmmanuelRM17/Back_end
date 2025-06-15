@@ -61,6 +61,9 @@ router.post("/Pagos/", async (req, res) => {
       concepto, metodo_pago, fecha_pago, estado, comprobante, notas 
     } = req.body;
 
+    // Mapear métodos de pago del frontend a los de la BD
+    const metodoPagoMapeado = mapearMetodoPago(metodo_pago);
+
     const query = `
       INSERT INTO pagos (
         paciente_id, cita_id, factura_id, monto, subtotal, total,
@@ -71,16 +74,26 @@ router.post("/Pagos/", async (req, res) => {
     db.query(
       query, 
       [paciente_id, cita_id || null, factura_id || null, monto, subtotal, total,
-       concepto, metodo_pago, fecha_pago, estado, comprobante, notas],
+       concepto, metodoPagoMapeado, fecha_pago, estado, comprobante, notas],
       (err, results) => {
         if (err) return handleQueryError(err, res, "crear pago");
         
-        // Actualizar estado de cita si está relacionado
+        // CORRECCIÓN: Actualizar estado_pago en lugar de estado
         if (cita_id) {
           const updateCitaQuery = `
-            UPDATE citas SET estado = 'Pagada' WHERE id = ? AND estado = 'Confirmada';
+            UPDATE citas 
+            SET estado_pago = ? 
+            WHERE id = ? AND estado = 'Completada';
           `;
-          db.query(updateCitaQuery, [cita_id]);
+          
+          // Determinar el estado_pago según el monto
+          const estadoPago = total >= monto ? 'Pagado' : 'Parcial';
+          
+          db.query(updateCitaQuery, [estadoPago, cita_id], (updateErr) => {
+            if (updateErr) {
+              console.error('Error actualizando estado_pago de cita:', updateErr);
+            }
+          });
         }
         
         res.status(201).json({ 
@@ -94,6 +107,17 @@ router.post("/Pagos/", async (req, res) => {
   }
 });
 
+// Función auxiliar para mapear métodos de pago
+function mapearMetodoPago(metodoPago) {
+  const mapeo = {
+    'Efectivo': 'Efectivo',
+    'MercadoPago': 'Tarjeta',
+    'PayPal': 'Transferencia'
+  };
+  
+  return mapeo[metodoPago] || 'Efectivo';
+}
+
 // Endpoint para actualizar un pago
 router.put("/Pagos/:id", async (req, res) => {
   try {
@@ -102,6 +126,8 @@ router.put("/Pagos/:id", async (req, res) => {
       paciente_id, cita_id, factura_id, monto, subtotal, total,
       concepto, metodo_pago, fecha_pago, estado, comprobante, notas 
     } = req.body;
+
+    const metodoPagoMapeado = mapearMetodoPago(metodo_pago);
 
     const query = `
       UPDATE pagos SET
@@ -124,7 +150,7 @@ router.put("/Pagos/:id", async (req, res) => {
     db.query(
       query,
       [paciente_id, cita_id || null, factura_id || null, monto, subtotal, total,
-       concepto, metodo_pago, fecha_pago, estado, comprobante, notas, id],
+       concepto, metodoPagoMapeado, fecha_pago, estado, comprobante, notas, id],
       (err, results) => {
         if (err) return handleQueryError(err, res, `actualizar pago #${id}`);
         
@@ -132,12 +158,17 @@ router.put("/Pagos/:id", async (req, res) => {
           return res.status(404).json({ error: "Pago no encontrado" });
         }
         
-        // Actualizar estado de cita si está relacionado
+        // CORRECCIÓN: Actualizar estado_pago
         if (cita_id && estado === 'Pagado') {
           const updateCitaQuery = `
-            UPDATE citas SET estado = 'Pagada' WHERE id = ?;
+            UPDATE citas 
+            SET estado_pago = ? 
+            WHERE id = ?;
           `;
-          db.query(updateCitaQuery, [cita_id]);
+          
+          const estadoPago = total >= monto ? 'Pagado' : 'Parcial';
+          
+          db.query(updateCitaQuery, [estadoPago, cita_id]);
         }
         
         res.json({ 

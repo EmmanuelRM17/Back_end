@@ -1142,9 +1142,6 @@ function validarTransicionEstado(estadoActual, nuevoEstado) {
     return false;
 }
 
-// SOLUCIÓN 1: Modificar el endpoint en citas.js 
-// Reemplazar el código actual del endpoint por este:
-
 router.put('/incrementarCitas/:id', async (req, res) => {
     const { id } = req.params; // ID del tratamiento
     const { cita_id } = req.body; // ID de la cita que se completó (consulta_id)
