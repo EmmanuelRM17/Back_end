@@ -41,11 +41,11 @@ router.get("/Pagos/:id", async (req, res) => {
 
     db.query(query, [id], (err, results) => {
       if (err) return handleQueryError(err, res, `obtener pago #${id}`);
-      
+
       if (results.length === 0) {
         return res.status(404).json({ error: "Pago no encontrado" });
       }
-      
+
       res.json(results[0]);
     });
   } catch (error) {
@@ -56,9 +56,9 @@ router.get("/Pagos/:id", async (req, res) => {
 // Endpoint para crear un nuevo pago
 router.post("/Pagos/", async (req, res) => {
   try {
-    const { 
+    const {
       paciente_id, cita_id, factura_id, monto, subtotal, total,
-      concepto, metodo_pago, fecha_pago, estado, comprobante, notas 
+      concepto, metodo_pago, fecha_pago, estado, comprobante, notas
     } = req.body;
 
     // Mapear métodos de pago del frontend a los de la BD
@@ -72,12 +72,12 @@ router.post("/Pagos/", async (req, res) => {
     `;
 
     db.query(
-      query, 
+      query,
       [paciente_id, cita_id || null, factura_id || null, monto, subtotal, total,
-       concepto, metodoPagoMapeado, fecha_pago, estado, comprobante, notas],
+        concepto, metodoPagoMapeado, fecha_pago, estado, comprobante, notas],
       (err, results) => {
         if (err) return handleQueryError(err, res, "crear pago");
-        
+
         // CORRECCIÓN: Actualizar estado_pago en lugar de estado
         if (cita_id) {
           const updateCitaQuery = `
@@ -85,20 +85,20 @@ router.post("/Pagos/", async (req, res) => {
             SET estado_pago = ? 
             WHERE id = ? AND estado = 'Completada';
           `;
-          
+
           // Determinar el estado_pago según el monto
           const estadoPago = total >= monto ? 'Pagado' : 'Parcial';
-          
+
           db.query(updateCitaQuery, [estadoPago, cita_id], (updateErr) => {
             if (updateErr) {
               console.error('Error actualizando estado_pago de cita:', updateErr);
             }
           });
         }
-        
-        res.status(201).json({ 
+
+        res.status(201).json({
           id: results.insertId,
-          message: "Pago registrado correctamente" 
+          message: "Pago registrado correctamente"
         });
       }
     );
@@ -107,27 +107,16 @@ router.post("/Pagos/", async (req, res) => {
   }
 });
 
-// Función auxiliar para mapear métodos de pago
-function mapearMetodoPago(metodoPago) {
-  const mapeo = {
-    'Efectivo': 'Efectivo',
-    'MercadoPago': 'Tarjeta',
-    'PayPal': 'Transferencia'
-  };
-  
-  return mapeo[metodoPago] || 'Efectivo';
-}
-
 // Endpoint para actualizar un pago
 router.put("/Pagos/:id", async (req, res) => {
   try {
     const { id } = req.params;
-    const { 
+    const {
       paciente_id, cita_id, factura_id, monto, subtotal, total,
-      concepto, metodo_pago, fecha_pago, estado, comprobante, notas 
+      concepto, metodo_pago, fecha_pago, estado, comprobante, notas
     } = req.body;
 
-    const metodoPagoMapeado = mapearMetodoPago(metodo_pago);
+    const metodoPago = metodo_pago;
 
     const query = `
       UPDATE pagos SET
@@ -150,14 +139,14 @@ router.put("/Pagos/:id", async (req, res) => {
     db.query(
       query,
       [paciente_id, cita_id || null, factura_id || null, monto, subtotal, total,
-       concepto, metodoPagoMapeado, fecha_pago, estado, comprobante, notas, id],
+        concepto, metodoPagoMapeado, fecha_pago, estado, comprobante, notas, id],
       (err, results) => {
         if (err) return handleQueryError(err, res, `actualizar pago #${id}`);
-        
+
         if (results.affectedRows === 0) {
           return res.status(404).json({ error: "Pago no encontrado" });
         }
-        
+
         // CORRECCIÓN: Actualizar estado_pago
         if (cita_id && estado === 'Pagado') {
           const updateCitaQuery = `
@@ -165,15 +154,15 @@ router.put("/Pagos/:id", async (req, res) => {
             SET estado_pago = ? 
             WHERE id = ?;
           `;
-          
+
           const estadoPago = total >= monto ? 'Pagado' : 'Parcial';
-          
+
           db.query(updateCitaQuery, [estadoPago, cita_id]);
         }
-        
-        res.json({ 
+
+        res.json({
           id: parseInt(id),
-          message: "Pago actualizado correctamente" 
+          message: "Pago actualizado correctamente"
         });
       }
     );
@@ -190,11 +179,11 @@ router.delete("/Pagos/:id", async (req, res) => {
 
     db.query(query, [id], (err, results) => {
       if (err) return handleQueryError(err, res, `eliminar pago #${id}`);
-      
+
       if (results.affectedRows === 0) {
         return res.status(404).json({ error: "Pago no encontrado" });
       }
-      
+
       res.json({ message: "Pago eliminado correctamente" });
     });
   } catch (error) {
