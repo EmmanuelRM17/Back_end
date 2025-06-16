@@ -1,15 +1,15 @@
-// routes/payments.js - Rutas de Pagos con TUS credenciales
+// routes/payments.js - Rutas de Pagos con Nueva API de MercadoPago
 const express = require('express');
 const router = express.Router();
 const configureMercadoPago = require('../config/mercadopago');
 const configurePayPal = require('../config/paypal');
 const paypal = require('@paypal/checkout-server-sdk');
 
-// Inicializar servicios de pago con TUS credenciales
-const { mercadopago } = configureMercadoPago();
+// Inicializar servicios de pago con TUS credenciales (Nueva API)
+const { preference: mercadopagoPreference } = configureMercadoPago();
 const { client: paypalClient, convertMXNToUSD } = configurePayPal();
 
-// ============= MERCADOPAGO =============
+// ============= MERCADOPAGO (Nueva API) =============
 
 // Crear preferencia de pago en MercadoPago
 router.post('/mercadopago/create-preference', async (req, res) => {
@@ -30,7 +30,8 @@ router.post('/mercadopago/create-preference', async (req, res) => {
       });
     }
 
-    const preference = {
+    // Estructura de preferencia (Nueva API)
+    const preferenceData = {
       items: [
         {
           title: title,
@@ -57,14 +58,15 @@ router.post('/mercadopago/create-preference', async (req, res) => {
       }
     };
 
-    const response = await mercadopago.preferences.create(preference);
+    // Crear preferencia con nueva API
+    const response = await mercadopagoPreference.create({ body: preferenceData });
     
-    console.log('🦷 Preferencia MercadoPago creada:', response.body.id);
+    console.log('🦷 Preferencia MercadoPago creada:', response.id);
     
     res.json({
-      preference_id: response.body.id,
-      init_point: response.body.init_point,
-      sandbox_init_point: response.body.sandbox_init_point
+      preference_id: response.id,
+      init_point: response.init_point,
+      sandbox_init_point: response.sandbox_init_point
     });
 
   } catch (error) {
@@ -76,7 +78,7 @@ router.post('/mercadopago/create-preference', async (req, res) => {
   }
 });
 
-// Webhook para MercadoPago
+// Webhook para MercadoPago (Nueva API)
 router.post('/mercadopago/webhook', async (req, res) => {
   try {
     const { type, data } = req.body;
@@ -84,8 +86,12 @@ router.post('/mercadopago/webhook', async (req, res) => {
     console.log('🔔 Webhook MercadoPago recibido:', { type, data });
 
     if (type === 'payment') {
-      const payment = await mercadopago.payment.findById(data.id);
-      const paymentData = payment.body;
+      // Usar nueva API para obtener el pago
+      const { Payment } = require('mercadopago');
+      const { client } = configureMercadoPago();
+      const payment = new Payment(client);
+      
+      const paymentData = await payment.get({ id: data.id });
       
       console.log('💳 Estado del pago:', paymentData.status);
       
@@ -101,7 +107,7 @@ router.post('/mercadopago/webhook', async (req, res) => {
             currency: 'MXN',
             status: 'approved',
             payment_method: paymentData.payment_method_id,
-            payer_email: paymentData.payer.email,
+            payer_email: paymentData.payer?.email,
             service_id: paymentData.metadata?.service_id,
             patient_id: paymentData.metadata?.patient_id
           });
@@ -286,17 +292,21 @@ async function procesarPagoRechazado(paymentData) {
   }
 }
 
-// Obtener estado de pago
+// Obtener estado de pago (Nueva API)
 router.get('/status/:platform/:paymentId', async (req, res) => {
   try {
     const { platform, paymentId } = req.params;
 
     if (platform === 'mercadopago') {
-      const payment = await mercadopago.payment.findById(paymentId);
+      const { Payment } = require('mercadopago');
+      const { client } = configureMercadoPago();
+      const payment = new Payment(client);
+      
+      const paymentData = await payment.get({ id: paymentId });
       res.json({
-        status: payment.body.status,
-        amount: payment.body.transaction_amount,
-        payment_method: payment.body.payment_method_id,
+        status: paymentData.status,
+        amount: paymentData.transaction_amount,
+        payment_method: paymentData.payment_method_id,
         currency: 'MXN'
       });
     } else if (platform === 'paypal') {
@@ -324,7 +334,7 @@ router.get('/status/:platform/:paymentId', async (req, res) => {
 router.get('/test', (req, res) => {
   res.json({
     message: '🦷 API de Pagos Dental funcionando',
-    mercadopago: 'Configurado ✅',
+    mercadopago: 'Configurado ✅ (Nueva API)',
     paypal: 'Configurado ✅',
     timestamp: new Date().toISOString()
   });
