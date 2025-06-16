@@ -8,6 +8,15 @@ const handleQueryError = (err, res, mensaje) => {
   return res.status(500).json({ error: "Error interno del servidor" });
 };
 
+const mapearMetodoPago = (metodo) => {
+  const mapeo = {
+    'Efectivo': 'Efectivo',
+    'MercadoPago': 'MercadoPago',
+    'PayPal': 'PayPal'
+  };
+  return mapeo[metodo] || 'Efectivo'; // Default a Efectivo si no encuentra el método
+};
+
 // Endpoint para obtener todos los pagos
 router.get("/Pagos/", async (req, res) => {
   try {
