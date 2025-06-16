@@ -50,6 +50,7 @@ const chatbot = require("./routes/chatbot");
 const Registrer = require("./routes/registrer");
 const Citas = require("./routes/admin/citas")
 const Tratamientos = require("./routes/admin/tratamientos.js")
+const paymentRoutes = require('./routes/payments');
 
 const politicasRoutes = require("./routes/admin/inf/inf_politicasRoutes");
 const deslindeRoutes = require("./routes/admin/inf/inf_deslindelegal");
@@ -82,7 +83,7 @@ app.use("/api/users", userRoutes);
 app.use("/api/citas", Citas);
 app.use("/api/tratamientos", Tratamientos);
 app.use("/api/chatbot", chatbot);
-
+app.use('/api/payments', paymentRoutes);
 
 //administrador
 app.use("/api/politicas", politicasRoutes);
