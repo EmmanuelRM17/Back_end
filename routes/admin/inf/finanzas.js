@@ -57,7 +57,7 @@ router.get("/Pagos/:id", async (req, res) => {
 router.post("/Pagos/", async (req, res) => {
   try {
     const {
-      paciente_id, cita_id, factura_id, monto, subtotal, total,
+      paciente_id, cita_id, factura_id, monto, subtotal, total, 
       concepto, metodo_pago, fecha_pago, estado, comprobante, notas
     } = req.body;
 
