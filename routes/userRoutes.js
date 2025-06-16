@@ -301,7 +301,7 @@ async function autenticarUsuario(
   );
 }
 
-// MODIFICACIÓN: Check-auth con tu estilo de callbacks anidados
+// MODIFICACIÓN: Check-auth que devuelve TODOS los usuarios autenticados
 router.get("/check-auth", (req, res) => {
   // Obtener las cookies de los diferentes roles
   const adminToken = req.cookies?.carolDental_admin;
@@ -313,125 +313,120 @@ router.get("/check-auth", (req, res) => {
     return res.status(401).json({ authenticated: false });
   }
 
-  // Consulta para buscar si el token existe en la tabla de pacientes
-  const queryPacientes = `
-      SELECT id, nombre, email, 'paciente' as tipo
-      FROM pacientes 
-      WHERE cookie = ?
-  `;
+  // Objetos para almacenar resultados
+  let usuariosAutenticados = {};
+  let consultasCompletadas = 0;
+  let totalConsultas = 0;
 
-  // Consulta para buscar si el token existe en la tabla de administradores
-  const queryAdministradores = `
-      SELECT id, nombre, email, 'administrador' as tipo
-      FROM administradores 
-      WHERE cookie = ?
-  `;
+  // Determinar cuántas consultas hacer
+  if (adminToken) totalConsultas++;
+  if (pacienteToken) totalConsultas++;
+  if (empleadoToken) totalConsultas++;
 
-  // Consulta para buscar si el token existe en la tabla de empleados
-  const queryEmpleados = `
-    SELECT id, nombre, email, 'empleado' as tipo
-    FROM empleados 
-    WHERE cookie = ?
-  `;
+  // Función para verificar si ya completamos todas las consultas
+  function verificarCompletado() {
+    consultasCompletadas++;
+    if (consultasCompletadas === totalConsultas) {
+      // Si tenemos usuarios autenticados, devolver el resultado
+      if (Object.keys(usuariosAutenticados).length > 0) {
+        // Determinar el usuario principal basado en prioridad: admin > empleado > paciente
+        let usuarioPrincipal = null;
+        let userType = null;
 
-  // Primero busca en la tabla de pacientes si hay token de paciente
-  if (pacienteToken) {
-    db.query(queryPacientes, [pacienteToken], (err, resultsPacientes) => {
-      if (err) {
-        console.error("Error al verificar autenticación en pacientes:", err);
-        return res.status(500).json({ authenticated: false, message: "Error al verificar autenticación" });
-      }
+        if (usuariosAutenticados.administrador) {
+          usuarioPrincipal = usuariosAutenticados.administrador;
+          userType = 'administradores';
+        } else if (usuariosAutenticados.empleado) {
+          usuarioPrincipal = usuariosAutenticados.empleado;
+          userType = 'empleados';
+        } else if (usuariosAutenticados.paciente) {
+          usuarioPrincipal = usuariosAutenticados.paciente;
+          userType = 'pacientes';
+        }
 
-      if (resultsPacientes.length > 0) {
-        // Si el token es válido para un paciente
-        const userData = resultsPacientes[0];
         return res.json({
           authenticated: true,
-          user: {
-            id: userData.id,
-            nombre: userData.nombre,
-            email: userData.email,
-            tipo: userData.tipo
-          },
-          userType: 'pacientes'
+          user: usuarioPrincipal,
+          userType: userType,
+          // NUEVO: Enviar todos los usuarios autenticados
+          allAuthenticatedUsers: usuariosAutenticados
         });
-      }
-
-      // Si no se encuentra en pacientes, continuar con empleados
-      buscarEnEmpleados();
-    });
-  } else {
-    // Si no hay token de paciente, buscar en empleados
-    buscarEnEmpleados();
-  }
-
-  function buscarEnEmpleados() {
-    if (empleadoToken) {
-      db.query(queryEmpleados, [empleadoToken], (err, resultsEmpleados) => {
-        if (err) {
-          console.error("Error al verificar autenticación en empleados:", err);
-          return res.status(500).json({ authenticated: false, message: "Error al verificar autenticación" });
-        }
-
-        if (resultsEmpleados.length > 0) {
-          const userData = resultsEmpleados[0];
-          return res.json({
-            authenticated: true,
-            user: {
-              id: userData.id,
-              nombre: userData.nombre,
-              email: userData.email,
-              tipo: userData.tipo
-            },
-            userType: 'empleados'
-          });
-        }
-
-        // Si no se encuentra en empleados, buscar en administradores
-        buscarEnAdministradores();
-      });
-    } else {
-      // Si no hay token de empleado, buscar en administradores
-      buscarEnAdministradores();
-    }
-  }
-
-  function buscarEnAdministradores() {
-    if (adminToken) {
-      db.query(queryAdministradores, [adminToken], (err, resultsAdmin) => {
-        if (err) {
-          console.error("Error al verificar autenticación en administradores:", err);
-          return res.status(500).json({ authenticated: false, message: "Error al verificar autenticación" });
-        }
-
-        if (resultsAdmin.length > 0) {
-          // Si el token es válido para un administrador
-          const userData = resultsAdmin[0];
-          return res.json({
-            authenticated: true,
-            user: {
-              id: userData.id,
-              nombre: userData.nombre,
-              email: userData.email,
-              tipo: userData.tipo
-            },
-            userType: 'administradores'
-          });
-        }
-
-        // Si no se encuentra el token en ninguno de los lugares, el token no es válido
+      } else {
         return res.status(401).json({
           authenticated: false,
           message: "Token no válido"
         });
-      });
-    } else {
-      // Si no hay ningún token válido
-      return res.status(401).json({
-        authenticated: false,
-        message: "No hay sesión activa"
-      });
+      }
     }
+  }
+
+  // Verificar administrador si hay token
+  if (adminToken) {
+    const queryAdministradores = `
+        SELECT id, nombre, email, 'administrador' as tipo
+        FROM administradores 
+        WHERE cookie = ?
+    `;
+    
+    db.query(queryAdministradores, [adminToken], (err, resultsAdmin) => {
+      if (err) {
+        console.error("Error al verificar autenticación en administradores:", err);
+      } else if (resultsAdmin.length > 0) {
+        usuariosAutenticados.administrador = {
+          id: resultsAdmin[0].id,
+          nombre: resultsAdmin[0].nombre,
+          email: resultsAdmin[0].email,
+          tipo: resultsAdmin[0].tipo
+        };
+      }
+      verificarCompletado();
+    });
+  }
+
+  // Verificar empleado si hay token
+  if (empleadoToken) {
+    const queryEmpleados = `
+      SELECT id, nombre, email, 'empleado' as tipo
+      FROM empleados 
+      WHERE cookie = ?
+    `;
+    
+    db.query(queryEmpleados, [empleadoToken], (err, resultsEmpleados) => {
+      if (err) {
+        console.error("Error al verificar autenticación en empleados:", err);
+      } else if (resultsEmpleados.length > 0) {
+        usuariosAutenticados.empleado = {
+          id: resultsEmpleados[0].id,
+          nombre: resultsEmpleados[0].nombre,
+          email: resultsEmpleados[0].email,
+          tipo: resultsEmpleados[0].tipo
+        };
+      }
+      verificarCompletado();
+    });
+  }
+
+  // Verificar paciente si hay token
+  if (pacienteToken) {
+    const queryPacientes = `
+        SELECT id, nombre, email, 'paciente' as tipo
+        FROM pacientes 
+        WHERE cookie = ?
+    `;
+    
+    db.query(queryPacientes, [pacienteToken], (err, resultsPacientes) => {
+      if (err) {
+        console.error("Error al verificar autenticación en pacientes:", err);
+      } else if (resultsPacientes.length > 0) {
+        usuariosAutenticados.paciente = {
+          id: resultsPacientes[0].id,
+          nombre: resultsPacientes[0].nombre,
+          email: resultsPacientes[0].email,
+          tipo: resultsPacientes[0].tipo
+        };
+      }
+      verificarCompletado();
+    });
   }
 });
 
