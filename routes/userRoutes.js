@@ -107,8 +107,12 @@ router.post("/login", async (req, res) => {
         const checkEmpleadoSql = "SELECT * FROM empleados WHERE email = ?";
         db.query(checkEmpleadoSql, [email], async (err, resultEmpleado) => {
           if (err) {
-            logger.error(`Error al verificar correo del empleado: ${err.message}`);
-            return res.status(500).json({ message: "Error al verificar correo." });
+            logger.error(
+              `Error al verificar correo del empleado: ${err.message}`
+            );
+            return res
+              .status(500)
+              .json({ message: "Error al verificar correo." });
           }
 
           if (resultEmpleado.length > 0) {
@@ -173,8 +177,12 @@ async function autenticarUsuario(
 ) {
   const checkAttemptsSql = `
     SELECT * FROM inf_login_attempts
-    WHERE ${tipoUsuario === "administrador" ? "administrador_id" :
-      tipoUsuario === "empleado" ? "empleado_id" : "paciente_id"
+    WHERE ${
+      tipoUsuario === "administrador"
+        ? "administrador_id"
+        : tipoUsuario === "empleado"
+        ? "empleado_id"
+        : "paciente_id"
     } = ? AND ip_address = ?
     ORDER BY fecha_hora DESC LIMIT 1
 `;
@@ -221,28 +229,36 @@ async function autenticarUsuario(
 
         // Insertar o actualizar el intento fallido
         const attemptSql = lastAttempt
-          ? `UPDATE inf_login_attempts SET intentos_fallidos = ?, fecha_bloqueo = ?, fecha_hora = ? WHERE ${tipoUsuario === "administrador" ? "administrador_id" :
-            tipoUsuario === "empleado" ? "empleado_id" : "paciente_id"
-          } = ? AND ip_address = ?`
-          : `INSERT INTO inf_login_attempts (${tipoUsuario === "administrador" ? "administrador_id" :
-            tipoUsuario === "empleado" ? "empleado_id" : "paciente_id"
-          }, ip_address, exitoso, intentos_fallidos, fecha_bloqueo, fecha_hora) VALUES (?, ?, 0, ?, ?, ?)`;
+          ? `UPDATE inf_login_attempts SET intentos_fallidos = ?, fecha_bloqueo = ?, fecha_hora = ? WHERE ${
+              tipoUsuario === "administrador"
+                ? "administrador_id"
+                : tipoUsuario === "empleado"
+                ? "empleado_id"
+                : "paciente_id"
+            } = ? AND ip_address = ?`
+          : `INSERT INTO inf_login_attempts (${
+              tipoUsuario === "administrador"
+                ? "administrador_id"
+                : tipoUsuario === "empleado"
+                ? "empleado_id"
+                : "paciente_id"
+            }, ip_address, exitoso, intentos_fallidos, fecha_bloqueo, fecha_hora) VALUES (?, ?, 0, ?, ?, ?)`;
 
         const params = lastAttempt
           ? [
-            failedAttempts,
-            newFechaBloqueo,
-            now.toISOString(),
-            usuario.id,
-            ipAddress,
-          ]
+              failedAttempts,
+              newFechaBloqueo,
+              now.toISOString(),
+              usuario.id,
+              ipAddress,
+            ]
           : [
-            usuario.id,
-            ipAddress,
-            failedAttempts,
-            newFechaBloqueo,
-            now.toISOString(),
-          ];
+              usuario.id,
+              ipAddress,
+              failedAttempts,
+              newFechaBloqueo,
+              now.toISOString(),
+            ];
 
         db.query(attemptSql, params, (err) => {
           if (err) {
@@ -268,33 +284,43 @@ async function autenticarUsuario(
       }
 
       const sessionToken = generateToken();
-      const updateTokenSql = `UPDATE ${tipoUsuario === "administrador" ? "administradores" :
-          tipoUsuario === "empleado" ? "empleados" : "pacientes"
-        } SET cookie = ? WHERE id = ?`;
+      const updateTokenSql = `UPDATE ${
+        tipoUsuario === "administrador"
+          ? "administradores"
+          : tipoUsuario === "empleado"
+          ? "empleados"
+          : "pacientes"
+      } SET cookie = ? WHERE id = ?`;
 
       db.query(updateTokenSql, [sessionToken, usuario.id], (err) => {
-        if (err) return res.status(500).json({ message: 'Error en el servidor.' });
+        if (err)
+          return res.status(500).json({ message: "Error en el servidor." });
 
         // MODIFICACIÓN: Configuración de cookies separadas por rol
-        const cookieName = `carolDental_${tipoUsuario === "administrador" ? "admin" : 
-                           tipoUsuario === "empleado" ? "empleado" : "paciente"}`;
+        const cookieName = `carolDental_${
+          tipoUsuario === "administrador"
+            ? "admin"
+            : tipoUsuario === "empleado"
+            ? "empleado"
+            : "paciente"
+        }`;
 
         res.cookie(cookieName, sessionToken, {
           httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
-          path: '/',
-          maxAge: 24 * 60 * 60 * 1000
+          secure: process.env.NODE_ENV === "production",
+          sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
+          path: "/",
+          maxAge: 24 * 60 * 60 * 1000,
         });
 
         return res.status(200).json({
-          message: 'Inicio de sesión exitoso',
+          message: "Inicio de sesión exitoso",
           user: {
             nombre: usuario.nombre,
             email: usuario.email,
             tipo: tipoUsuario,
-            token: sessionToken
-          }
+            token: sessionToken,
+          },
         });
       });
     }
@@ -335,13 +361,13 @@ router.get("/check-auth", (req, res) => {
 
         if (usuariosAutenticados.administrador) {
           usuarioPrincipal = usuariosAutenticados.administrador;
-          userType = 'administradores';
+          userType = "administradores";
         } else if (usuariosAutenticados.empleado) {
           usuarioPrincipal = usuariosAutenticados.empleado;
-          userType = 'empleados';
+          userType = "empleados";
         } else if (usuariosAutenticados.paciente) {
           usuarioPrincipal = usuariosAutenticados.paciente;
-          userType = 'pacientes';
+          userType = "pacientes";
         }
 
         return res.json({
@@ -349,12 +375,12 @@ router.get("/check-auth", (req, res) => {
           user: usuarioPrincipal,
           userType: userType,
           // NUEVO: Enviar todos los usuarios autenticados
-          allAuthenticatedUsers: usuariosAutenticados
+          allAuthenticatedUsers: usuariosAutenticados,
         });
       } else {
         return res.status(401).json({
           authenticated: false,
-          message: "Token no válido"
+          message: "Token no válido",
         });
       }
     }
@@ -367,16 +393,19 @@ router.get("/check-auth", (req, res) => {
         FROM administradores 
         WHERE cookie = ?
     `;
-    
+
     db.query(queryAdministradores, [adminToken], (err, resultsAdmin) => {
       if (err) {
-        console.error("Error al verificar autenticación en administradores:", err);
+        console.error(
+          "Error al verificar autenticación en administradores:",
+          err
+        );
       } else if (resultsAdmin.length > 0) {
         usuariosAutenticados.administrador = {
           id: resultsAdmin[0].id,
           nombre: resultsAdmin[0].nombre,
           email: resultsAdmin[0].email,
-          tipo: resultsAdmin[0].tipo
+          tipo: resultsAdmin[0].tipo,
         };
       }
       verificarCompletado();
@@ -390,7 +419,7 @@ router.get("/check-auth", (req, res) => {
       FROM empleados 
       WHERE cookie = ?
     `;
-    
+
     db.query(queryEmpleados, [empleadoToken], (err, resultsEmpleados) => {
       if (err) {
         console.error("Error al verificar autenticación en empleados:", err);
@@ -399,7 +428,7 @@ router.get("/check-auth", (req, res) => {
           id: resultsEmpleados[0].id,
           nombre: resultsEmpleados[0].nombre,
           email: resultsEmpleados[0].email,
-          tipo: resultsEmpleados[0].tipo
+          tipo: resultsEmpleados[0].tipo,
         };
       }
       verificarCompletado();
@@ -409,31 +438,39 @@ router.get("/check-auth", (req, res) => {
   // Verificar paciente si hay token
   if (pacienteToken) {
     const queryPacientes = `
-        SELECT 
-        id,
-        nombre,
-        aPaterno,
-        aMaterno,
-        fechaNacimiento,
-        genero,
-        telefono,
-        email,
-        condiciones_medicas,
-        estado,
-        'paciente' as tipo
-      FROM pacientes
-      WHERE cookie = ?
-    `;
-    
+    SELECT 
+      id,
+      nombre,
+      aPaterno,
+      aMaterno,
+      fechaNacimiento,
+      genero,
+      telefono,
+      email,
+      condiciones_medicas,
+      estado,
+      'paciente' as tipo
+    FROM pacientes
+    WHERE cookie = ?
+  `;
+
     db.query(queryPacientes, [pacienteToken], (err, resultsPacientes) => {
       if (err) {
         console.error("Error al verificar autenticación en pacientes:", err);
       } else if (resultsPacientes.length > 0) {
+        const paciente = resultsPacientes[0];
         usuariosAutenticados.paciente = {
-          id: resultsPacientes[0].id,
-          nombre: resultsPacientes[0].nombre,
-          email: resultsPacientes[0].email,
-          tipo: resultsPacientes[0].tipo
+          id: paciente.id,
+          nombre: paciente.nombre,
+          aPaterno: paciente.aPaterno,
+          aMaterno: paciente.aMaterno,
+          fechaNacimiento: paciente.fechaNacimiento,
+          genero: paciente.genero,
+          telefono: paciente.telefono,
+          email: paciente.email,
+          condiciones_medicas: paciente.condiciones_medicas,
+          estado: paciente.estado,
+          tipo: paciente.tipo,
         };
       }
       verificarCompletado();
@@ -450,11 +487,12 @@ router.post("/logout", (req, res) => {
   // Limpiar todas las cookies
   const cookieOptions = {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: process.env.NODE_ENV === 'production' ? 'None' : 'Lax',
+    secure: process.env.NODE_ENV === "production",
+    sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
     path: "/",
     maxAge: 0,
-    domain: process.env.NODE_ENV === "production" ? ".onrender.com" : "localhost",
+    domain:
+      process.env.NODE_ENV === "production" ? ".onrender.com" : "localhost",
   };
 
   res.cookie("carolDental_admin", "", cookieOptions);
@@ -509,7 +547,7 @@ router.post("/logout", (req, res) => {
         if (err) {
           console.error("Error al limpiar token en administradores:", err);
           return res.status(500).json({
-            message: "Error al cerrar sesión."
+            message: "Error al cerrar sesión.",
           });
         }
 
@@ -529,13 +567,13 @@ router.post("/logout", (req, res) => {
       console.log("No se encontró el token en la base de datos");
       // Aún consideramos el logout exitoso ya que las cookies fueron eliminadas
       return res.status(200).json({
-        message: "Sesión cerrada exitosamente."
+        message: "Sesión cerrada exitosamente.",
       });
     }
 
     console.log("Sesión cerrada exitosamente en la base de datos");
     return res.status(200).json({
-      message: "Sesión cerrada exitosamente."
+      message: "Sesión cerrada exitosamente.",
     });
   }
 });
