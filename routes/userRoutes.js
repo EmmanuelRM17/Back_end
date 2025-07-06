@@ -301,7 +301,7 @@ async function autenticarUsuario(
   );
 }
 
-// MODIFICACIÓN: Check-auth que devuelve TODOS los usuarios autenticados
+// Check-auth que devuelve TODOS los usuarios autenticados
 router.get("/check-auth", (req, res) => {
   // Obtener las cookies de los diferentes roles
   const adminToken = req.cookies?.carolDental_admin;
@@ -409,9 +409,20 @@ router.get("/check-auth", (req, res) => {
   // Verificar paciente si hay token
   if (pacienteToken) {
     const queryPacientes = `
-        SELECT id, nombre, email, 'paciente' as tipo
-        FROM pacientes 
-        WHERE cookie = ?
+        SELECT 
+        id,
+        nombre,
+        aPaterno,
+        aMaterno,
+        fechaNacimiento,
+        genero,
+        telefono,
+        email,
+        condiciones_medicas,
+        estado,
+        'paciente' as tipo
+      FROM pacientes
+      WHERE cookie = ?
     `;
     
     db.query(queryPacientes, [pacienteToken], (err, resultsPacientes) => {
@@ -430,7 +441,7 @@ router.get("/check-auth", (req, res) => {
   }
 });
 
-// MODIFICACIÓN: Logout con tu estilo de callbacks anidados
+// Logout con tu estilo de callbacks anidados
 router.post("/logout", (req, res) => {
   const adminToken = req.cookies?.carolDental_admin;
   const pacienteToken = req.cookies?.carolDental_paciente;
