@@ -1459,4 +1459,90 @@ router.get("/paciente/:id", async (req, res) => {
     }
 });
 
+// Endpoint para obtener la próxima cita de un paciente específico
+router.get("/paciente/:id/proxima", async (req, res) => {
+    const { id } = req.params;
+
+    if (!id || isNaN(id)) {
+        return res.status(400).json({ message: 'ID de paciente inválido.' });
+    }
+
+    try {
+        const query = `
+            SELECT 
+                c.id,
+                c.paciente_id,
+                c.odontologo_id,
+                c.odontologo_nombre,
+                c.servicio_id,
+                c.servicio_nombre,
+                c.categoria_servicio,
+                c.precio_servicio,
+                c.fecha_consulta,
+                c.estado,
+                c.notas,
+                c.tratamiento_id,
+                c.numero_cita_tratamiento,
+                CASE 
+                    WHEN c.tratamiento_id IS NOT NULL THEN 1
+                    ELSE 0
+                END as es_tratamiento
+            FROM 
+                citas c
+            WHERE 
+                c.paciente_id = ? 
+                AND c.estado IN ('Confirmada', 'Pendiente')
+                AND c.fecha_consulta > NOW()
+                AND c.archivado = FALSE
+            ORDER BY 
+                c.fecha_consulta ASC
+            LIMIT 1
+        `;
+
+        const [results] = await db.promise().query(query, [id]);
+
+        if (results.length === 0) {
+            return res.status(404).json({ 
+                message: 'No hay citas próximas programadas.',
+                tiene_proxima_cita: false
+            });
+        }
+
+        const proximaCita = results[0];
+
+        // Formatear la fecha en español usando moment
+        const fechaCompleta = moment(proximaCita.fecha_consulta)
+            .locale('es')
+            .format('DD [de] MMMM, YYYY');
+        
+        const horaCompleta = moment(proximaCita.fecha_consulta)
+            .format('h:mm A');
+
+        res.json({
+            tiene_proxima_cita: true,
+            cita: {
+                id: proximaCita.id,
+                fecha: fechaCompleta,
+                hora: horaCompleta,
+                doctor: proximaCita.odontologo_nombre || 'Por asignar',
+                tipo: proximaCita.servicio_nombre,
+                categoria: proximaCita.categoria_servicio,
+                estado: proximaCita.estado,
+                es_tratamiento: proximaCita.es_tratamiento === 1,
+                tratamiento_id: proximaCita.tratamiento_id,
+                numero_cita_tratamiento: proximaCita.numero_cita_tratamiento,
+                notas: proximaCita.notas,
+                fecha_completa: proximaCita.fecha_consulta // Para manipulaciones adicionales
+            }
+        });
+
+    } catch (error) {
+        logger.error(`Error al obtener próxima cita del paciente #${id}:`, error);
+        res.status(500).json({ 
+            message: 'Error interno del servidor al obtener la próxima cita.',
+            error: error.message 
+        });
+    }
+});
+
 module.exports = router;
