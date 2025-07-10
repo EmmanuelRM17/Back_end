@@ -374,7 +374,6 @@ router.get("/check-auth", (req, res) => {
           authenticated: true,
           user: usuarioPrincipal,
           userType: userType,
-          // NUEVO: Enviar todos los usuarios autenticados
           allAuthenticatedUsers: usuariosAutenticados,
         });
       } else {

@@ -101,7 +101,6 @@ app.use("/api/Graficas",Graficas);
 app.use("/api/Finanzas",Finanzas);
 app.use("/api/resenya" ,resenyas);
 
-
 //empleados
 app.use("/api/expediente", expediente);
 app.use("/api/empleados", Empleados);
