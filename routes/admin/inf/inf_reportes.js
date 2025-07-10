@@ -2,28 +2,41 @@ const express = require("express");
 const router = express.Router();
 const db = require("../../../db");
 
-// Endpoint para obtener intentos de login
+// Obtener todos los intentos de login (pacientes, empleados, administradores)
 router.get("/login-attempts", async (_req, res) => {
   try {
     const attemptsSql = `
-        SELECT id, ip_address, paciente_id, fecha_hora, intentos_fallidos, fecha_bloqueo
-        FROM inf_login_attempts
-      `;
+      SELECT 
+        id, 
+        ip_address, 
+        paciente_id, 
+        empleado_id, 
+        administrador_id, 
+        fecha_hora, 
+        exitoso, 
+        intentos_fallidos, 
+        fecha_bloqueo,
+        CASE 
+          WHEN paciente_id IS NOT NULL THEN 'paciente'
+          WHEN empleado_id IS NOT NULL THEN 'empleado'
+          WHEN administrador_id IS NOT NULL THEN 'administrador'
+          ELSE 'unknown'
+        END as tipo_usuario,
+        COALESCE(paciente_id, empleado_id, administrador_id) as usuario_id
+      FROM inf_login_attempts
+      ORDER BY fecha_hora DESC
+    `;
 
     db.query(attemptsSql, async (err, attempts) => {
       if (err) {
-        return res
-          .status(500)
-          .json({
-            message: "Error al obtener los intentos de inicio de sesión.",
-          });
+        return res.status(500).json({
+          message: "Error al obtener los intentos de inicio de sesión.",
+        });
       }
 
-      // También puedes agregar la configuración de intentos máximos y tiempo de bloqueo si es relevante
-      const maxAttemptsSql =
-        'SELECT setting_value FROM config WHERE setting_name = "MAX_ATTEMPTS"';
-      const lockTimeSql =
-        'SELECT setting_value FROM config WHERE setting_name = "LOCK_TIME_MINUTES"';
+      // Obtener configuración de seguridad
+      const maxAttemptsSql = 'SELECT setting_value FROM config WHERE setting_name = "MAX_ATTEMPTS"';
+      const lockTimeSql = 'SELECT setting_value FROM config WHERE setting_name = "LOCK_TIME_MINUTES"';
 
       const maxAttempts = await new Promise((resolve, reject) => {
         db.query(maxAttemptsSql, (err, result) => {
@@ -50,9 +63,62 @@ router.get("/login-attempts", async (_req, res) => {
   }
 });
 
-// Endpoint para obtener logs
+// Obtener información de usuario por ID y tipo
+router.get("/usuario/:tipo/:id", (req, res) => {
+  const { tipo, id } = req.params;
+
+  // Validar tipo de usuario
+  const tiposPermitidos = ['paciente', 'empleado', 'administrador'];
+  if (!tiposPermitidos.includes(tipo)) {
+    return res.status(400).json({ 
+      error: "Tipo de usuario no válido. Debe ser: paciente, empleado o administrador" 
+    });
+  }
+
+  // Determinar tabla y campos según el tipo
+  let tabla, campos;
+  
+  switch (tipo) {
+    case 'paciente':
+      tabla = 'pacientes';
+      campos = `id, nombre, aPaterno, aMaterno, fechaNacimiento, genero, 
+                telefono, email, condiciones_medicas, estado, 'paciente' as tipo`;
+      break;
+    
+    case 'empleado':
+      tabla = 'empleados';
+      campos = `id, nombre, aPaterno, aMaterno, telefono, email, 
+                puesto, fecha_contratacion, estado, 'empleado' as tipo`;
+      break;
+    
+    case 'administrador':
+      tabla = 'administradores';
+      campos = `id, nombre, email, fecha_creacion, estado, 'administrador' as tipo`;
+      break;
+  }
+
+  const query = `SELECT ${campos} FROM ${tabla} WHERE id = ?`;
+  
+  db.query(query, [id], (err, results) => {
+    if (err) {
+      return res.status(500).json({ 
+        error: `Error al obtener la información del ${tipo}` 
+      });
+    }
+
+    if (results.length === 0) {
+      return res.status(404).json({ 
+        message: `${tipo.charAt(0).toUpperCase() + tipo.slice(1)} no encontrado` 
+      });
+    }
+
+    res.status(200).json(results[0]);
+  });
+});
+
+// Obtener logs del sistema
 router.get("/logs", async (_req, res) => {
-  const query = "SELECT * FROM inf_logs";
+  const query = "SELECT * FROM inf_logs ORDER BY timestamp DESC";
   db.query(query, (err, results) => {
     if (err) {
       return res.status(500).json({ error: "Error al obtener logs" });
@@ -61,79 +127,117 @@ router.get("/logs", async (_req, res) => {
   });
 });
 
-// Endpoint para obtener información de un paciente por su ID
-router.get("/paciente/:id", (req, res) => {
-  const pacienteId = req.params.id;
-
-  const query = "SELECT * FROM pacientes WHERE id = ?";
-  db.query(query, [pacienteId], (err, results) => {
-    if (err) {
-      return res
-        .status(500)
-        .json({ error: "Error al obtener la información del paciente" });
-    }
-
-    if (results.length === 0) {
-      return res.status(404).json({ message: "Paciente no encontrado" });
-    }
-
-    res.status(200).json(results[0]); // Retornamos solo la primera coincidencia
-  });
-});
-
-// Este endpoint actualizará los valores en la tabla 'config'
+// Actualizar configuración de seguridad
 router.post("/update-config", async (req, res) => {
   const { settingName, settingValue } = req.body;
 
   if (!settingName || !settingValue) {
-    return res
-      .status(400)
-      .json({ message: "Nombre y valor de la configuración son requeridos." });
+    return res.status(400).json({ 
+      message: "Nombre y valor de la configuración son requeridos." 
+    });
   }
 
-  const updateConfigSql =
-    "UPDATE config SET setting_value = ? WHERE setting_name = ?";
+  // Validar configuraciones permitidas
+  const configsPermitidas = ['MAX_ATTEMPTS', 'LOCK_TIME_MINUTES'];
+  if (!configsPermitidas.includes(settingName)) {
+    return res.status(400).json({ 
+      message: "Configuración no válida." 
+    });
+  }
 
-  db.query(updateConfigSql, [settingValue, settingName], (err, _result) => {
+  // Validar que el valor sea un número positivo
+  const numValue = parseInt(settingValue, 10);
+  if (isNaN(numValue) || numValue <= 0) {
+    return res.status(400).json({ 
+      message: "El valor debe ser un número positivo." 
+    });
+  }
+
+  const updateConfigSql = "UPDATE config SET setting_value = ? WHERE setting_name = ?";
+
+  db.query(updateConfigSql, [settingValue, settingName], (err, result) => {
     if (err) {
-      return res
-        .status(500)
-        .json({ message: "Error al actualizar la configuración." });
+      return res.status(500).json({ 
+        message: "Error al actualizar la configuración." 
+      });
     }
-    return res
-      .status(200)
-      .json({ message: "Configuración actualizada exitosamente." });
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ 
+        message: "Configuración no encontrada." 
+      });
+    }
+    
+    return res.status(200).json({ 
+      message: "Configuración actualizada exitosamente." 
+    });
   });
 });
 
-// Endpoint para obtener pacientes
-router.get("/pacientes", async (_req, res) => {
+// Obtener todos los pacientes con paginación
+router.get("/pacientes", async (req, res) => {
   try {
+    const { page = 1, limit = 10, search = '' } = req.query;
+    const offset = (page - 1) * limit;
+
+    let whereClause = '';
+    let queryParams = [];
+
+    // Agregar filtro de búsqueda si se proporciona
+    if (search) {
+      whereClause = `WHERE nombre LIKE ? OR aPaterno LIKE ? OR aMaterno LIKE ? OR email LIKE ?`;
+      queryParams = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
+    }
+
     const query = `
-      SELECT * FROM pacientes
+      SELECT id, nombre, aPaterno, aMaterno, email, telefono, estado, fecha_creacion
+      FROM pacientes 
+      ${whereClause}
+      ORDER BY fecha_creacion DESC
+      LIMIT ? OFFSET ?
     `;
 
-    db.query(query, (err, results) => {
+    queryParams.push(parseInt(limit), parseInt(offset));
+
+    db.query(query, queryParams, (err, results) => {
       if (err) {
-        logger.error(`Error al obtener pacientes: ${err.message}`);
         return res.status(500).json({ message: "Error al obtener pacientes." });
       }
 
-      return res.status(200).json(results);
+      // Obtener el total de registros para la paginación
+      const countQuery = `SELECT COUNT(*) as total FROM pacientes ${whereClause}`;
+      const countParams = search ? [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`] : [];
+
+      db.query(countQuery, countParams, (err, countResult) => {
+        if (err) {
+          return res.status(500).json({ message: "Error al contar pacientes." });
+        }
+
+        const total = countResult[0].total;
+        const totalPages = Math.ceil(total / limit);
+
+        return res.status(200).json({
+          pacientes: results,
+          pagination: {
+            currentPage: parseInt(page),
+            totalPages,
+            totalRecords: total,
+            hasNext: page < totalPages,
+            hasPrev: page > 1
+          }
+        });
+      });
     });
   } catch (error) {
-    logger.error(`Error en el servidor: ${error.message}`);
     return res.status(500).json({ message: "Error en el servidor." });
   }
 });
 
+// Actualizar estado de paciente
 router.put("/pacientes/:id/status", async (req, res) => {
   try {
     const { id } = req.params;
     const { estado } = req.body;
-
-    console.log('ID recibido:', id);
-    console.log('Estado recibido:', estado);
 
     if (!id || !estado) {
       return res.status(400).json({ 
@@ -152,13 +256,12 @@ router.put("/pacientes/:id/status", async (req, res) => {
 
     const query = `
       UPDATE pacientes 
-      SET estado = ?,
-          ultima_actualizacion = CURRENT_TIMESTAMP
+      SET estado = ?, ultima_actualizacion = CURRENT_TIMESTAMP
       WHERE id = ?
     `;
+    
     db.query(query, [estado, id], (err, result) => {
       if (err) {
-        console.error('Error en la query:', err);
         return res.status(500).json({ 
           success: false,
           message: "Error al actualizar el estado en la base de datos.",
@@ -176,15 +279,10 @@ router.put("/pacientes/:id/status", async (req, res) => {
       return res.status(200).json({
         success: true,
         message: "Estado actualizado correctamente",
-        data: {
-          id,
-          estado,
-          affectedRows: result.affectedRows
-        }
+        data: { id, estado, affectedRows: result.affectedRows }
       });
     });
   } catch (error) {
-    console.error('Error en el servidor:', error);
     return res.status(500).json({ 
       success: false,
       message: "Error interno del servidor.",
@@ -192,6 +290,5 @@ router.put("/pacientes/:id/status", async (req, res) => {
     });
   }
 });
-
 
 module.exports = router;
