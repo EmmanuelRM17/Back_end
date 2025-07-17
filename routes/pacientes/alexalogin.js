@@ -1,6 +1,5 @@
 const express = require("express");
 const router = express.Router();
-const bcrypt = require("bcryptjs");
 const crypto = require("crypto");
 const db = require("../db");
 const xss = require("xss");
@@ -37,16 +36,11 @@ async function getConfigValue(settingName) {
   });
 }
 
-// Endpoint de login para pacientes usando teléfono y contraseña
+// Endpoint de login para pacientes usando solo teléfono
 router.post("/loginalexa", async (req, res) => {
   try {
     const telefono = xss(req.body.telefono); // Sanitizar input
-    const password = xss(req.body.password);
     const ipAddress = req.ip;
-
-    // Obtener valores de configuración desde la base de datos
-    const MAX_ATTEMPTS = await getConfigValue("MAX_ATTEMPTS");
-    const LOCK_TIME_MINUTES = await getConfigValue("LOCK_TIME_MINUTES");
 
     // Verificar el límite de IP con el rate limiter
     try {
@@ -58,10 +52,10 @@ router.post("/loginalexa", async (req, res) => {
         .json({ message: "Demasiados intentos. Inténtalo más tarde." });
     }
 
-    if (!telefono || !password) {
+    if (!telefono) {
       return res
         .status(400)
-        .json({ message: "Proporciona teléfono y contraseña." });
+        .json({ message: "Proporciona un número de teléfono." });
     }
 
     // Consultar paciente por teléfono
@@ -100,6 +94,10 @@ router.post("/loginalexa", async (req, res) => {
           const now = new Date();
           const lastAttempt = attemptsResult[0];
 
+          // Obtener valores de configuración desde la base de datos
+          const MAX_ATTEMPTS = await getConfigValue("MAX_ATTEMPTS");
+          const LOCK_TIME_MINUTES = await getConfigValue("LOCK_TIME_MINUTES");
+
           // Verificar si está bloqueado
           if (lastAttempt && lastAttempt.fecha_bloqueo) {
             const fechaBloqueo = new Date(lastAttempt.fecha_bloqueo);
@@ -112,41 +110,20 @@ router.post("/loginalexa", async (req, res) => {
             }
           }
 
-          // Verificar la contraseña
-          const isMatch = await bcrypt.compare(password, paciente.password);
-          if (!isMatch) {
-            const failedAttempts = lastAttempt
-              ? lastAttempt.intentos_fallidos + 1
-              : 1;
+          // Si no hay intentos previos o el último fue exitoso, proceder
+          const failedAttempts = lastAttempt ? lastAttempt.intentos_fallidos : 0;
 
-            let newFechaBloqueo = null;
-            if (failedAttempts >= MAX_ATTEMPTS) {
-              const bloqueo = new Date(
-                now.getTime() + LOCK_TIME_MINUTES * 60 * 1000
-              );
-              newFechaBloqueo = bloqueo.toISOString();
-            }
+          if (failedAttempts >= MAX_ATTEMPTS) {
+            const bloqueo = new Date(now.getTime() + LOCK_TIME_MINUTES * 60 * 1000);
+            const newFechaBloqueo = bloqueo.toISOString();
 
-            // Insertar o actualizar el intento fallido
             const attemptSql = lastAttempt
               ? `UPDATE inf_login_attempts SET intentos_fallidos = ?, fecha_bloqueo = ?, fecha_hora = ? WHERE paciente_id = ? AND ip_address = ?`
               : `INSERT INTO inf_login_attempts (paciente_id, ip_address, exitoso, intentos_fallidos, fecha_bloqueo, fecha_hora) VALUES (?, ?, 0, ?, ?, ?)`;
 
             const params = lastAttempt
-              ? [
-                  failedAttempts,
-                  newFechaBloqueo,
-                  now.toISOString(),
-                  paciente.id,
-                  ipAddress,
-                ]
-              : [
-                  paciente.id,
-                  ipAddress,
-                  failedAttempts,
-                  newFechaBloqueo,
-                  now.toISOString(),
-                ];
+              ? [failedAttempts + 1, newFechaBloqueo, now.toISOString(), paciente.id, ipAddress]
+              : [paciente.id, ipAddress, 1, newFechaBloqueo, now.toISOString()];
 
             db.query(attemptSql, params, (err) => {
               if (err) {
@@ -156,27 +133,21 @@ router.post("/loginalexa", async (req, res) => {
               }
             });
 
-            if (failedAttempts >= MAX_ATTEMPTS) {
-              return res.status(429).json({
-                message: `Cuenta bloqueada hasta ${newFechaBloqueo}.`,
-                lockStatus: true,
-                lockUntil: newFechaBloqueo,
-              });
-            }
-
-            return res.status(401).json({
-              message: "Contraseña incorrecta.",
-              failedAttempts,
+            return res.status(429).json({
+              message: `Cuenta bloqueada hasta ${newFechaBloqueo}.`,
+              lockStatus: true,
               lockUntil: newFechaBloqueo,
             });
           }
 
+          // Generar token y actualizar la base de datos
           const sessionToken = generateToken();
           const updateTokenSql = `UPDATE pacientes SET cookie = ? WHERE id = ?`;
 
           db.query(updateTokenSql, [sessionToken, paciente.id], (err) => {
-            if (err)
+            if (err) {
               return res.status(500).json({ message: "Error en el servidor." });
+            }
 
             // Configuración de cookie para paciente
             const cookieName = "carolDental_paciente";
@@ -187,6 +158,17 @@ router.post("/loginalexa", async (req, res) => {
               sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
               path: "/",
               maxAge: 24 * 60 * 60 * 1000,
+            });
+
+            // Actualizar o insertar intento exitoso
+            const attemptSql = lastAttempt
+              ? `UPDATE inf_login_attempts SET exitoso = 1, intentos_fallidos = 0, fecha_bloqueo = NULL, fecha_hora = ? WHERE paciente_id = ? AND ip_address = ?`
+              : `INSERT INTO inf_login_attempts (paciente_id, ip_address, exitoso, intentos_fallidos, fecha_bloqueo, fecha_hora) VALUES (?, ?, 1, 0, NULL, ?)`;
+
+            db.query(attemptSql, [now.toISOString(), paciente.id, ipAddress], (err) => {
+              if (err) {
+                logger.error(`Error al registrar intento exitoso: ${err.message}`);
+              }
             });
 
             return res.status(200).json({
