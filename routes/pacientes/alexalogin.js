@@ -26,10 +26,10 @@ router.post("/loginalexa", (req, res) => {
     return res.status(200).json({
       message: "Inicio de sesión exitoso",
       user: {
+        id: paciente.id,
         nombre: paciente.nombre,
         telefono: paciente.telefono,
-        email: paciente.email,
-        tipo: "paciente"
+        email: paciente.email
       }
     });
   });
