@@ -75,7 +75,7 @@ const resenyas = require("./routes/admin/resenyasUsers");
 //pacientes
 const paciente =require("./routes/pacientes/pacientes")
 const p_perfil = require("./routes/pacientes/perfil")
-
+const loginalexa =require("./routes/pacientes/alexalogin.js")
 const whatsappRouter = require('./routes/whatsapp');
 
 
@@ -111,7 +111,7 @@ app.use("/api/horarios", Horarios);
 //pacientes
 app.use("/api/pacientes", paciente);
 app.use("/api/profile", p_perfil);
-
+app.use("/api/paciente/", loginalexa)
 
 app.use('/api/whatsapp', whatsappRouter);
 
