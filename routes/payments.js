@@ -2,7 +2,7 @@
 const express = require('express');
 const router = express.Router();
 const configureMercadoPago = require('../config/mercadopago');
-const configurePayPal = require('../config/pay<pal');
+const configurePayPal = require('../config/paypal');
 const paypal = require('@paypal/checkout-server-sdk');
 
 // Inicializar servicios de pago con TUS credenciales (Nueva API)
