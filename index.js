@@ -50,7 +50,6 @@ const chatbot = require("./routes/chatbot");
 const Registrer = require("./routes/registrer");
 const Citas = require("./routes/admin/citas")
 const Tratamientos = require("./routes/admin/tratamientos.js")
-const paymentRoutes = require('./routes/payments');
 
 const politicasRoutes = require("./routes/admin/inf/inf_politicasRoutes");
 const deslindeRoutes = require("./routes/admin/inf/inf_deslindelegal");
@@ -67,7 +66,10 @@ const Empleados = require("./routes/empleado/empleados");
 const Horarios = require("./routes/empleado/horarios");
 const CalendarioCitas = require("./routes/admin/inf/calendarioCitas");
 const Graficas = require("./routes/admin/inf/graficas");
+
 const Finanzas = require("./routes/admin/inf/finanzas.js");
+const paymentRoutes = require('./routes/payments');
+
 const resenyas = require("./routes/admin/resenyasUsers");
 
 //pacientes
