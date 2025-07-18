@@ -64,6 +64,127 @@ router.get("/Pagos/", (req, res) => {
   }
 });
 
+// Endpoint para hacer lo de pagos 
+router.post("/Pagos/upsert", (req, res) => {
+  try {
+    const {
+      paciente_id, cita_id, factura_id, monto, subtotal, total,
+      concepto, metodo_pago, fecha_pago, estado, comprobante, notas
+    } = req.body;
+
+    // Validar datos requeridos
+    if (!paciente_id || !monto || !concepto || !metodo_pago) {
+      return res.status(400).json({ 
+        error: "Faltan datos requeridos: paciente_id, monto, concepto, metodo_pago" 
+      });
+    }
+
+    // Mapear método de pago
+    const metodoPagoMapeado = mapearMetodoPago(metodo_pago);
+
+    // ✅ VERIFICAR SI YA EXISTE UN PAGO PARA ESTA CITA
+    const checkQuery = `SELECT id FROM pagos WHERE cita_id = ? LIMIT 1`;
+    
+    db.query(checkQuery, [cita_id], (checkErr, checkResults) => {
+      if (checkErr) return handleQueryError(checkErr, res, "verificar pago existente");
+      
+      if (checkResults.length > 0) {
+        // ✅ ACTUALIZAR PAGO EXISTENTE
+        const pagoExistenteId = checkResults[0].id;
+        const updateQuery = `
+          UPDATE pagos SET 
+            paciente_id = ?, factura_id = ?, monto = ?, subtotal = ?, total = ?,
+            concepto = ?, metodo_pago = ?, fecha_pago = ?, estado = ?, 
+            comprobante = ?, notas = ?, fecha_actualizacion = CURRENT_TIMESTAMP
+          WHERE id = ?
+        `;
+        
+        db.query(updateQuery, [
+          paciente_id, 
+          factura_id || null, 
+          monto, 
+          subtotal || monto, 
+          total || monto,
+          concepto, 
+          metodoPagoMapeado, 
+          fecha_pago || new Date(), 
+          estado || 'Pagado',
+          comprobante || `${metodoPagoMapeado}-${Date.now()}`, 
+          notas || '', 
+          pagoExistenteId
+        ], (updateErr, updateResults) => {
+          if (updateErr) return handleQueryError(updateErr, res, "actualizar pago");
+          
+          // Actualizar estado_pago de la cita
+          actualizarEstadoCita(cita_id, total || monto, monto);
+          
+          res.status(200).json({
+            id: pagoExistenteId,
+            message: "Pago actualizado correctamente",
+            metodo_pago: metodoPagoMapeado,
+            action: 'updated'
+          });
+        });
+        
+      } else {
+        // ✅ CREAR PAGO NUEVO (código original)
+        const insertQuery = `
+          INSERT INTO pagos (
+            paciente_id, cita_id, factura_id, monto, subtotal, total,
+            concepto, metodo_pago, fecha_pago, estado, comprobante, notas
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `;
+        
+        db.query(insertQuery, [
+          paciente_id, 
+          cita_id || null, 
+          factura_id || null, 
+          monto, 
+          subtotal || monto, 
+          total || monto,
+          concepto, 
+          metodoPagoMapeado, 
+          fecha_pago || new Date(), 
+          estado || 'Pagado', 
+          comprobante || `${metodoPagoMapeado}-${Date.now()}`, 
+          notas || ''
+        ], (insertErr, insertResults) => {
+          if (insertErr) return handleQueryError(insertErr, res, "crear pago");
+          
+          // Actualizar estado_pago de la cita
+          actualizarEstadoCita(cita_id, total || monto, monto);
+          
+          res.status(201).json({
+            id: insertResults.insertId,
+            message: "Pago registrado correctamente",
+            metodo_pago: metodoPagoMapeado,
+            action: 'created'
+          });
+        });
+      }
+    });
+    
+  } catch (error) {
+    handleQueryError(error, res, "procesar pago upsert");
+  }
+});
+
+// Función helper para actualizar estado de cita
+function actualizarEstadoCita(cita_id, totalPagado, montoCita) {
+  if (!cita_id) return;
+  
+  const estadoPago = (parseFloat(totalPagado) >= parseFloat(montoCita)) ? 'Pagado' : 'Parcial';
+  const updateCitaQuery = `UPDATE citas SET estado_pago = ? WHERE id = ?`;
+  
+  db.query(updateCitaQuery, [estadoPago, cita_id], (updateErr) => {
+    if (updateErr) {
+      console.error('Error actualizando estado_pago de cita:', updateErr);
+    } else {
+      console.log(`✅ Cita ${cita_id} actualizada a estado_pago: ${estadoPago}`);
+    }
+  });
+}
+
 // Endpoint para obtener un pago específico
 router.get("/Pagos/:id", (req, res) => {
   try {
@@ -94,7 +215,7 @@ router.get("/Pagos/:id", (req, res) => {
 });
 
 // Endpoint para crear un nuevo pago
-router.post("/Pagos/upsert", (req, res) => {
+router.post("/Pagos/", (req, res) => {
   try {
     const {
       paciente_id, cita_id, factura_id, monto, subtotal, total,
@@ -108,93 +229,66 @@ router.post("/Pagos/upsert", (req, res) => {
       });
     }
 
-    // ✅ VERIFICAR SI YA EXISTE UN PAGO PARA ESTA CITA
-    const checkQuery = `SELECT id FROM pagos WHERE cita_id = ? LIMIT 1`;
-    
-    db.query(checkQuery, [cita_id], (checkErr, checkResults) => {
-      if (checkErr) return handleQueryError(checkErr, res, "verificar pago existente");
-      
-      const metodoPagoMapeado = mapearMetodoPago(metodo_pago);
-      
-      if (checkResults.length > 0) {
-        // ✅ ACTUALIZAR PAGO EXISTENTE
-        const pagoExistenteId = checkResults[0].id;
-        const updateQuery = `
-          UPDATE pagos SET 
-            paciente_id = ?, factura_id = ?, monto = ?, subtotal = ?, total = ?,
-            concepto = ?, metodo_pago = ?, fecha_pago = ?, estado = ?, 
-            comprobante = ?, notas = ?, fecha_actualizacion = NOW()
-          WHERE id = ?
-        `;
-        
-        db.query(updateQuery, [
-          paciente_id, factura_id || null, monto, subtotal || monto, total || monto,
-          concepto, metodoPagoMapeado, fecha_pago || new Date(), estado || 'Pagado',
-          comprobante || `${metodoPagoMapeado}-${Date.now()}`, notas || '', pagoExistenteId
-        ], (updateErr, updateResults) => {
-          if (updateErr) return handleQueryError(updateErr, res, "actualizar pago");
-          
-          // Actualizar estado_pago de la cita
-          actualizarEstadoCita(cita_id, total || monto, monto);
-          
-          res.status(200).json({
-            id: pagoExistenteId,
-            message: "Pago actualizado correctamente",
-            metodo_pago: metodoPagoMapeado,
-            action: 'updated'
+    // Mapear método de pago
+    const metodoPagoMapeado = mapearMetodoPago(metodo_pago);
+
+    const query = `
+      INSERT INTO pagos (
+        paciente_id, cita_id, factura_id, monto, subtotal, total,
+        concepto, metodo_pago, fecha_pago, estado, comprobante, notas
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+    `;
+
+    db.query(
+      query,
+      [
+        paciente_id, 
+        cita_id || null, 
+        factura_id || null, 
+        monto, 
+        subtotal || monto, 
+        total || monto,
+        concepto, 
+        metodoPagoMapeado, 
+        fecha_pago || new Date(), 
+        estado || 'Pagado', 
+        comprobante || `${metodoPagoMapeado}-${Date.now()}`, 
+        notas || ''
+      ],
+      (err, results) => {
+        if (err) return handleQueryError(err, res, "crear pago");
+
+        // Actualizar estado_pago de la cita si existe
+        if (cita_id) {
+          const updateCitaQuery = `
+            UPDATE citas 
+            SET estado_pago = ? 
+            WHERE id = ?;
+          `;
+
+          const estadoPago = (parseFloat(total || monto) >= parseFloat(monto)) ? 'Pagado' : 'Parcial';
+
+          db.query(updateCitaQuery, [estadoPago, cita_id], (updateErr) => {
+            if (updateErr) {
+              console.error('Error actualizando estado_pago de cita:', updateErr);
+            } else {
+              console.log(`✅ Cita ${cita_id} actualizada a estado_pago: ${estadoPago}`);
+            }
           });
-        });
-        
-      } else {
-        // ✅ CREAR PAGO NUEVO (código original)
-        const insertQuery = `
-          INSERT INTO pagos (
-            paciente_id, cita_id, factura_id, monto, subtotal, total,
-            concepto, metodo_pago, fecha_pago, estado, comprobante, notas
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `;
-        
-        db.query(insertQuery, [
-          paciente_id, cita_id || null, factura_id || null, monto, 
-          subtotal || monto, total || monto, concepto, metodoPagoMapeado, 
-          fecha_pago || new Date(), estado || 'Pagado', 
-          comprobante || `${metodoPagoMapeado}-${Date.now()}`, notas || ''
-        ], (insertErr, insertResults) => {
-          if (insertErr) return handleQueryError(insertErr, res, "crear pago");
-          
-          // Actualizar estado_pago de la cita
-          actualizarEstadoCita(cita_id, total || monto, monto);
-          
-          res.status(201).json({
-            id: insertResults.insertId,
-            message: "Pago registrado correctamente",
-            metodo_pago: metodoPagoMapeado,
-            action: 'created'
-          });
+        }
+
+        res.status(201).json({
+          id: results.insertId,
+          message: "Pago registrado correctamente",
+          metodo_pago: metodoPagoMapeado
         });
       }
-    });
-    
+    );
   } catch (error) {
-    handleQueryError(error, res, "procesar pago");
+    handleQueryError(error, res, "registrar pago");
   }
 });
 
-// Función helper para actualizar estado de cita
-function actualizarEstadoCita(cita_id, totalPagado, montoCita) {
-  if (!cita_id) return;
-  
-  const estadoPago = (parseFloat(totalPagado) >= parseFloat(montoCita)) ? 'Pagado' : 'Parcial';
-  const updateCitaQuery = `UPDATE citas SET estado_pago = ? WHERE id = ?`;
-  
-  db.query(updateCitaQuery, [estadoPago, cita_id], (updateErr) => {
-    if (updateErr) {
-      console.error('Error actualizando estado_pago de cita:', updateErr);
-    } else {
-      console.log(`✅ Cita ${cita_id} actualizada a estado_pago: ${estadoPago}`);
-    }
-  });
-}
 // Endpoint para actualizar un pago
 router.put("/Pagos/:id", (req, res) => {
   try {

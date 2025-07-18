@@ -66,10 +66,8 @@ const Empleados = require("./routes/empleado/empleados");
 const Horarios = require("./routes/empleado/horarios");
 const CalendarioCitas = require("./routes/admin/inf/calendarioCitas");
 const Graficas = require("./routes/admin/inf/graficas");
-
 const Finanzas = require("./routes/admin/inf/finanzas.js");
 const paymentRoutes = require('./routes/payments');
-
 const resenyas = require("./routes/admin/resenyasUsers");
 
 //pacientes
