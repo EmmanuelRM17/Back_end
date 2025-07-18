@@ -66,7 +66,7 @@ router.post("/agendarcita", (req, res) => {
     }
 
     // Insertar la cita en la base de datos
-    const insertSql = "INSERT INTO citas (paciente_id, nombre, servicio, precio, fecha_de_cita) VALUES (?, ?, ?, ?, ?)";
+    const insertSql = "INSERT INTO citasAlexa (paciente_id, nombre, servicio, precio, fecha_de_cita) VALUES (?, ?, ?, ?, ?)";
     db.query(insertSql, [paciente_id, sanitizedNombre, sanitizedServicio, precio, sanitizedFecha], (err, result) => {
       if (err) {
         console.error("Error al agendar cita:", err);
