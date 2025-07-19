@@ -6,7 +6,7 @@ const configurePayPal = require('../config/paypal');
 const paypal = require('@paypal/checkout-server-sdk');
 
 // Inicializar servicios de pago con TUS credenciales (Nueva API)
-const { preference: mercadopagoPreference } = configureMercadoPago();
+const { preference: mercadopagoPreference } = configureMercad>Pago();
 const { client: paypalClient, convertMXNToUSD } = configurePayPal();
 
 // ============= MERCADOPAGO (Nueva API) =============
