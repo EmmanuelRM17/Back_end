@@ -1,29 +1,10 @@
 const express = require("express");
 const db = require("../../../db");
 const router = express.Router();
+const { getPaymentConfig } = require('../../../utils/configPayment');
 
-// Variables para pagos online (opcional)
-let mercadopagoPreference = null;
-let paypalClient = null;
-let convertMXNToUSD = null;
-
-// Intentar cargar configuraciones de pagos online
-try {
-  const configureMercadoPago = require("../../../config/mercadopago");
-  const configurePayPal = require("../../../config/paypal");
-  const paypal = require('@paypal/checkout-server-sdk');
-  
-  const mercadopagoConfig = configureMercadoPago();
-  const paypalConfig = configurePayPal();
-  
-  mercadopagoPreference = mercadopagoConfig.preference;
-  paypalClient = paypalConfig.client;
-  convertMXNToUSD = paypalConfig.convertMXNToUSD;
-  
-  console.log('✅ Pagos online configurados (MercadoPago + PayPal)');
-} catch (error) {
-  console.log('ℹ️ Pagos online no configurados - solo efectivo disponible');
-}
+const paypalSDK = require('@paypal/checkout-server-sdk');
+const { MercadoPagoConfig, Preference } = require('mercadopago');
 
 // Función para manejar errores de consulta
 const handleQueryError = (err, res, mensaje) => {
@@ -40,6 +21,45 @@ const mapearMetodoPago = (metodo) => {
   };
   return mapeo[metodo] || 'Efectivo';
 };
+
+
+// Función para guardar configuración específica
+const savePaymentSetting = (provider, settingKey, settingValue, environment = 'sandbox', callback) => {
+  const query = `
+    UPDATE config_payment 
+    SET setting_value = ?, updated_at = NOW() 
+    WHERE provider = ? AND setting_key = ? AND environment = ?
+  `;
+  
+  db.query(query, [settingValue, provider, settingKey, environment], (err, result) => {
+    if (err) return callback(err);
+    
+    if (result.affectedRows === 0) {
+      return callback(new Error(`Configuración no encontrada: ${provider}.${settingKey} en ${environment}`));
+    }
+    
+    callback(null, result);
+  });
+};
+
+// Función para obtener configuración específica
+const getPaymentSetting = (provider, settingKey, environment = 'sandbox', callback) => {
+  const query = `
+    SELECT setting_value 
+    FROM config_payment 
+    WHERE provider = ? AND setting_key = ? AND environment = ? AND is_active = 1
+  `;
+  
+  db.query(query, [provider, settingKey, environment], (err, result) => {
+    if (err) return callback(err, null);
+    
+    if (result.length === 0) {
+      return callback(null, null);
+    }
+    
+    callback(null, result[0].setting_value);
+  });
+}
 
 // Endpoint para obtener todos los pagos
 router.get("/Pagos/", (req, res) => {
@@ -720,6 +740,275 @@ router.get("/estadisticas", (req, res) => {
     });
   } catch (error) {
     handleQueryError(error, res, "obtener estadísticas");
+  }
+});
+
+// GET - Obtener configuración actual
+router.get('/config', (req, res) => {
+  try {
+    const environment = req.query.environment || 'sandbox';
+    
+    getPaymentConfig(environment, (err, config) => {
+      if (err) return handleQueryError(err, res, "obtener configuración");
+      
+      // Convertir strings a booleanos donde corresponda
+      const processedConfig = {};
+      Object.keys(config).forEach(provider => {
+        processedConfig[provider] = {};
+        Object.keys(config[provider]).forEach(key => {
+          const value = config[provider][key];
+          if (key === 'enabled') {
+            processedConfig[provider][key] = value === 'true' || value === '1';
+          } else {
+            processedConfig[provider][key] = value || '';
+          }
+        });
+      });
+      
+      res.json({
+        success: true,
+        environment: environment,
+        config: processedConfig
+      });
+    });
+  } catch (error) {
+    handleQueryError(error, res, "consulta de configuración");
+  }
+});
+
+// PUT - Guardar configuración
+router.put('/config', (req, res) => {
+  try {
+    const { config, environment = 'sandbox' } = req.body;
+    
+    if (!config) {
+      return res.status(400).json({ 
+        error: 'Configuración requerida' 
+      });
+    }
+    
+    // Contar total de operaciones para saber cuándo terminar
+    let totalOperations = 0;
+    let completedOperations = 0;
+    let hasError = false;
+    
+    // Contar operaciones
+    Object.keys(config).forEach(provider => {
+      Object.keys(config[provider]).forEach(key => {
+        totalOperations++;
+      });
+    });
+    
+    if (totalOperations === 0) {
+      return res.json({ 
+        success: true, 
+        message: 'No hay configuraciones para guardar',
+        environment: environment
+      });
+    }
+    
+    // Función para verificar si terminamos
+    const checkCompletion = () => {
+      completedOperations++;
+      if (completedOperations === totalOperations && !hasError) {
+        res.json({ 
+          success: true, 
+          message: 'Configuración guardada exitosamente',
+          environment: environment
+        });
+      }
+    };
+    
+    // Procesar configuraciones por proveedor
+    Object.keys(config).forEach(provider => {
+      Object.keys(config[provider]).forEach(key => {
+        let value = config[provider][key];
+        
+        // Convertir booleanos a strings
+        if (typeof value === 'boolean') {
+          value = value ? 'true' : 'false';
+        }
+        
+        savePaymentSetting(provider, key, value, environment, (err) => {
+          if (err && !hasError) {
+            hasError = true;
+            return handleQueryError(err, res, "guardar configuración");
+          }
+          checkCompletion();
+        });
+      });
+    });
+    
+  } catch (error) {
+    handleQueryError(error, res, "procesar configuración");
+  }
+});
+
+// POST - Probar conexión con MercadoPago
+router.post('/test-mercadopago', (req, res) => {
+  try {
+    const { environment = 'sandbox' } = req.body;
+    
+    // Obtener credenciales de la base de datos
+    getPaymentSetting('mercadopago', 'access_token', environment, (err, accessToken) => {
+      if (err) return handleQueryError(err, res, "obtener token MercadoPago");
+      
+      if (!accessToken) {
+        return res.status(400).json({ 
+          error: 'Access token de MercadoPago no configurado' 
+        });
+      }
+      
+      getPaymentSetting('mercadopago', 'enabled', environment, (err, enabled) => {
+        if (err) return handleQueryError(err, res, "verificar estado MercadoPago");
+        
+        if (enabled !== 'true') {
+          return res.status(400).json({ 
+            error: 'MercadoPago no está habilitado' 
+          });
+        }
+        
+        // Probar la conexión con axios
+        const axios = require('axios');
+        axios.get('https://api.mercadopago.com/v1/account/settings', {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        })
+        .then(response => {
+          if (response.status === 200) {
+            res.json({
+              success: true,
+              message: 'Conexión exitosa con MercadoPago',
+              environment: environment,
+              account_info: {
+                id: response.data.id || 'N/A',
+                name: response.data.name || 'N/A',
+                email: response.data.email || 'N/A',
+                country: response.data.country || 'N/A'
+              }
+            });
+          } else {
+            throw new Error('Respuesta inesperada de MercadoPago');
+          }
+        })
+        .catch(error => {
+          console.error('Error probando MercadoPago:', error);
+          
+          let errorMessage = 'Error de conexión con MercadoPago';
+          if (error.response) {
+            if (error.response.status === 401) {
+              errorMessage = 'Token de acceso inválido';
+            } else {
+              errorMessage = `Error ${error.response.status}: ${error.response.data?.message || 'Credenciales inválidas'}`;
+            }
+          } else if (error.code === 'ECONNABORTED') {
+            errorMessage = 'Timeout de conexión - Verifique su conexión a internet';
+          }
+          
+          res.status(400).json({ 
+            error: errorMessage,
+            details: error.message 
+          });
+        });
+      });
+    });
+  } catch (error) {
+    handleQueryError(error, res, "probar MercadoPago");
+  }
+});
+
+// POST - Probar conexión con PayPal
+router.post('/test-paypal', (req, res) => {
+  try {
+    const { environment = 'sandbox' } = req.body;
+    
+    // Obtener credenciales de la base de datos
+    getPaymentSetting('paypal', 'client_id', environment, (err, clientId) => {
+      if (err) return handleQueryError(err, res, "obtener client_id PayPal");
+      
+      getPaymentSetting('paypal', 'client_secret', environment, (err, clientSecret) => {
+        if (err) return handleQueryError(err, res, "obtener client_secret PayPal");
+        
+        if (!clientId || !clientSecret) {
+          return res.status(400).json({ 
+            error: 'Credenciales de PayPal no configuradas' 
+          });
+        }
+        
+        getPaymentSetting('paypal', 'enabled', environment, (err, enabled) => {
+          if (err) return handleQueryError(err, res, "verificar estado PayPal");
+          
+          if (enabled !== 'true') {
+            return res.status(400).json({ 
+              error: 'PayPal no está habilitado' 
+            });
+          }
+          
+          // Determinar URL base según el entorno
+          const baseUrl = environment === 'production' 
+            ? 'https://api-m.paypal.com'
+            : 'https://api-m.sandbox.paypal.com';
+          
+          // Obtener token de acceso
+          const auth = Buffer.from(`${clientId}:${clientSecret}`).toString('base64');
+          const axios = require('axios');
+          
+          axios.post(`${baseUrl}/v1/oauth2/token`, 
+            'grant_type=client_credentials',
+            {
+              headers: {
+                'Authorization': `Basic ${auth}`,
+                'Accept': 'application/json',
+                'Accept-Language': 'en_US',
+                'Content-Type': 'application/x-www-form-urlencoded'
+              },
+              timeout: 10000
+            }
+          )
+          .then(tokenResponse => {
+            if (tokenResponse.status === 200) {
+              res.json({
+                success: true,
+                message: 'Conexión exitosa con PayPal',
+                environment: environment,
+                account_info: {
+                  scope: tokenResponse.data.scope,
+                  token_type: tokenResponse.data.token_type,
+                  expires_in: tokenResponse.data.expires_in,
+                  app_id: tokenResponse.data.app_id || 'N/A'
+                }
+              });
+            } else {
+              throw new Error('No se pudo obtener token de PayPal');
+            }
+          })
+          .catch(error => {
+            console.error('Error probando PayPal:', error);
+            
+            let errorMessage = 'Error de conexión con PayPal';
+            if (error.response) {
+              if (error.response.status === 401) {
+                errorMessage = 'Credenciales de PayPal inválidas';
+              } else {
+                errorMessage = `Error ${error.response.status}: ${error.response.data?.error_description || 'Error de autenticación'}`;
+              }
+            } else if (error.code === 'ECONNABORTED') {
+              errorMessage = 'Timeout de conexión - Verifique su conexión a internet';
+            }
+            
+            res.status(400).json({ 
+              error: errorMessage,
+              details: error.message 
+            });
+          });
+        });
+      });
+    });
+  } catch (error) {
+    handleQueryError(error, res, "probar PayPal");
   }
 });
 

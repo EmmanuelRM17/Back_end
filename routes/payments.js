@@ -1,18 +1,152 @@
-// routes/payments.js - Rutas de Pagos con Nueva API de MercadoPago
+// routes/admin/inf/payments.js - Rutas de Pagos con configuración dinámica
 const express = require('express');
 const router = express.Router();
-const configureMercadoPago = require('../config/mercadopago');
-const configurePayPal = require('../config/paypal');
-const paypal = require('@paypal/checkout-server-sdk');
+const db = require('../../../db');
+const axios = require('axios');
+const { getPaymentConfig } = require('../utils/configPayment');
 
-// Inicializar servicios de pago con TUS credenciales (Nueva API)
-const { preference: mercadopagoPreference } = configureMercad>Pago();
-const { client: paypalClient, convertMXNToUSD } = configurePayPal();
+// ==================== FUNCIONES AUXILIARES ====================
 
-// ============= MERCADOPAGO (Nueva API) =============
+// Función para manejar errores (igual que en finanzas.js)
+const handleQueryError = (err, res, mensaje) => {
+  console.error(`Error: ${mensaje}`, err);
+  return res.status(500).json({ error: "Error interno del servidor" });
+};
+
+// Función para obtener configuración específica de config_payment
+const getPaymentSetting = (provider, settingKey, environment = 'sandbox', callback) => {
+  const query = `
+    SELECT setting_value 
+    FROM config_payment 
+    WHERE provider = ? AND setting_key = ? AND environment = ? AND is_active = 1
+  `;
+  
+  db.query(query, [provider, settingKey, environment], (err, result) => {
+    if (err) return callback(err, null);
+    
+    if (result.length === 0) {
+      return callback(null, null);
+    }
+    
+    callback(null, result[0].setting_value);
+  });
+};
+
+// Función para obtener configuración completa de MercadoPago
+const getMercadoPagoConfig = (environment = 'sandbox', callback) => {
+  getPaymentConfig(environment, (err, config) => {
+    if (err) return callback(err, null);
+
+    const mp = config.mercadopago || {};
+    callback(null, {
+      accessToken: mp.access_token || '',
+      publicKey: mp.public_key || '',
+      enabled: mp.enabled === 'true',
+      environment
+    });
+  });
+};
+
+// Función para obtener configuración completa de PayPal
+const getPayPalConfig = (environment = 'sandbox', callback) => {
+  getPaymentConfig(environment, (err, config) => {
+    if (err) return callback(err, null);
+
+    const pp = config.paypal || {};
+    const baseUrl = environment === 'production'
+      ? 'https://api-m.paypal.com'
+      : 'https://api-m.sandbox.paypal.com';
+
+    callback(null, {
+      clientId: pp.client_id || '',
+      clientSecret: pp.client_secret || '',
+      enabled: pp.enabled === 'true',
+      environment,
+      baseUrl
+    });
+  });
+};
+
+
+// Función para convertir MXN a USD
+const convertMXNToUSD = (amountMXN) => {
+  const exchangeRate = 18.50;
+  return (parseFloat(amountMXN) / exchangeRate).toFixed(2);
+};
+
+// Función para guardar pago aprobado en base de datos
+const procesarPagoAprobado = (paymentData, callback) => {
+  try {
+    console.log('✅ Procesando pago aprobado:', paymentData);
+    
+    const query = `
+      INSERT INTO pagos (
+        paciente_id, cita_id, monto, subtotal, total, concepto,
+        metodo_pago, fecha_pago, estado, comprobante, notas, fecha_creacion
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), 'Pagado', ?, ?, NOW())
+    `;
+    
+    const values = [
+      paymentData.patient_id,
+      paymentData.service_id,
+      paymentData.original_amount_mxn || paymentData.amount,
+      paymentData.original_amount_mxn || paymentData.amount,
+      paymentData.original_amount_mxn || paymentData.amount,
+      `Pago procesado via ${paymentData.platform}`,
+      paymentData.platform === 'mercadopago' ? 'MercadoPago' : 'PayPal',
+      paymentData.payment_id,
+      `Pago automático desde ${paymentData.platform}. Estado: ${paymentData.status}`
+    ];
+    
+    db.query(query, values, (err, result) => {
+      if (err) {
+        console.error('❌ Error guardando pago aprobado:', err);
+        return callback(err);
+      }
+      
+      console.log('✅ Pago guardado exitosamente:', result.insertId);
+      
+      // Actualizar estado de la cita si existe
+      if (paymentData.service_id) {
+        const updateCitaQuery = `UPDATE citas SET estado_pago = 'Pagado' WHERE id = ?`;
+        db.query(updateCitaQuery, [paymentData.service_id], (updateErr) => {
+          if (updateErr) {
+            console.error('Error actualizando cita:', updateErr);
+          } else {
+            console.log('✅ Cita actualizada tras pago automático');
+          }
+          callback(null, result);
+        });
+      } else {
+        callback(null, result);
+      }
+    });
+    
+  } catch (error) {
+    console.error('❌ Error procesando pago aprobado:', error);
+    callback(error);
+  }
+};
+
+// Función para procesar pago rechazado
+const procesarPagoRechazado = (paymentData, callback) => {
+  try {
+    console.log('❌ Pago rechazado:', paymentData);
+    
+    // Aquí puedes agregar lógica para notificar al usuario o actualizar estado
+    // Por ejemplo, enviar email de notificación, actualizar base de datos, etc.
+    
+    callback(null, 'Pago rechazado procesado');
+  } catch (error) {
+    console.error('❌ Error procesando pago rechazado:', error);
+    callback(error);
+  }
+};
+
+// ==================== MERCADOPAGO ====================
 
 // Crear preferencia de pago en MercadoPago
-router.post('/mercadopago/create-preference', async (req, res) => {
+router.post('/mercadopago/create-preference', (req, res) => {
   try {
     const { 
       title, 
@@ -20,7 +154,8 @@ router.post('/mercadopago/create-preference', async (req, res) => {
       email,
       reference,
       service_id,
-      patient_id 
+      patient_id,
+      environment = 'sandbox'
     } = req.body;
 
     // Validar datos requeridos
@@ -30,119 +165,169 @@ router.post('/mercadopago/create-preference', async (req, res) => {
       });
     }
 
-    // Estructura de preferencia (Nueva API)
-    const preferenceData = {
-      items: [
-        {
-          title: title,
-          quantity: 1,
-          unit_price: parseFloat(amount),
-          currency_id: 'MXN'
-        }
-      ],
-      payer: {
-        email: email
-      },
-      external_reference: reference || `DENTAL_${Date.now()}`,
-      notification_url: `${req.protocol}://${req.get('host')}/api/payments/mercadopago/webhook`,
-      back_urls: {
-        success: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-success`,
-        failure: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-failure`,
-        pending: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-pending`
-      },
-      auto_return: 'approved',
-      binary_mode: true,
-      metadata: {
-        service_id: service_id,
-        patient_id: patient_id
+    // Obtener configuración dinámica
+    getMercadoPagoConfig(environment, (err, config) => {
+      if (err) return handleQueryError(err, res, "obtener configuración MercadoPago");
+      
+      if (!config || !config.enabled) {
+        return res.status(400).json({
+          error: 'MercadoPago no está configurado o habilitado'
+        });
       }
-    };
 
-    // Crear preferencia con nueva API
-    const response = await mercadopagoPreference.create({ body: preferenceData });
-    
-    console.log('🦷 Preferencia MercadoPago creada:', response.id);
-    
-    res.json({
-      preference_id: response.id,
-      init_point: response.init_point,
-      sandbox_init_point: response.sandbox_init_point
+      // Crear preferencia
+      const preferenceData = {
+        items: [
+          {
+            title: title,
+            quantity: 1,
+            unit_price: parseFloat(amount),
+            currency_id: 'MXN'
+          }
+        ],
+        payer: {
+          email: email
+        },
+        external_reference: reference || `DENTAL_${Date.now()}`,
+        notification_url: `${req.protocol}://${req.get('host')}/api/payments/mercadopago/webhook`,
+        back_urls: {
+          success: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-success`,
+          failure: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-failure`,
+          pending: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-pending`
+        },
+        auto_return: 'approved',
+        binary_mode: true,
+        metadata: {
+          service_id: service_id,
+          patient_id: patient_id
+        }
+      };
+
+      // Crear preferencia con API de MercadoPago
+      axios.post('https://api.mercadopago.com/checkout/preferences', preferenceData, {
+        headers: {
+          'Authorization': `Bearer ${config.accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        timeout: 10000
+      })
+      .then(response => {
+        console.log('🦷 Preferencia MercadoPago creada:', response.data.id);
+        
+        res.json({
+          preference_id: response.data.id,
+          init_point: response.data.init_point,
+          sandbox_init_point: response.data.sandbox_init_point,
+          public_key: config.publicKey
+        });
+      })
+      .catch(error => {
+        console.error('❌ Error creando preferencia MercadoPago:', error);
+        res.status(500).json({
+          error: 'Error interno del servidor',
+          details: error.response?.data || error.message
+        });
+      });
     });
 
   } catch (error) {
-    console.error('❌ Error creando preferencia MercadoPago:', error);
-    res.status(500).json({
-      error: 'Error interno del servidor',
-      details: error.message
-    });
+    handleQueryError(error, res, "crear preferencia MercadoPago");
   }
 });
 
-// Webhook para MercadoPago (Nueva API)
-router.post('/mercadopago/webhook', async (req, res) => {
+// Webhook para MercadoPago
+router.post('/mercadopago/webhook', (req, res) => {
   try {
     const { type, data } = req.body;
     
     console.log('🔔 Webhook MercadoPago recibido:', { type, data });
 
     if (type === 'payment') {
-      // Usar nueva API para obtener el pago
-      const { Payment } = require('mercadopago');
-      const { client } = configureMercadoPago();
-      const payment = new Payment(client);
-      
-      const paymentData = await payment.get({ id: data.id });
-      
-      console.log('💳 Estado del pago:', paymentData.status);
-      
-      // Procesar según el estado del pago
-      switch (paymentData.status) {
-        case 'approved':
-          // Pago aprobado - actualizar base de datos
-          await procesarPagoAprobado({
-            platform: 'mercadopago',
-            payment_id: paymentData.id,
-            external_reference: paymentData.external_reference,
-            amount: paymentData.transaction_amount,
-            currency: 'MXN',
-            status: 'approved',
-            payment_method: paymentData.payment_method_id,
-            payer_email: paymentData.payer?.email,
-            service_id: paymentData.metadata?.service_id,
-            patient_id: paymentData.metadata?.patient_id
-          });
-          break;
-        
-        case 'rejected':
-          // Pago rechazado
-          await procesarPagoRechazado({
-            platform: 'mercadopago',
-            payment_id: paymentData.id,
-            external_reference: paymentData.external_reference,
-            reason: paymentData.status_detail
-          });
-          break;
-      }
+      // Obtener configuración dinámica
+      getMercadoPagoConfig('sandbox', (err, config) => {
+        if (err || !config) {
+          console.error('Configuración de MercadoPago no disponible');
+          return res.status(500).send('Config Error');
+        }
+
+        // Obtener información del pago
+        axios.get(`https://api.mercadopago.com/v1/payments/${data.id}`, {
+          headers: {
+            'Authorization': `Bearer ${config.accessToken}`
+          },
+          timeout: 10000
+        })
+        .then(paymentResponse => {
+          const paymentData = paymentResponse.data;
+          console.log('💳 Estado del pago:', paymentData.status);
+          
+          // Procesar según el estado del pago
+          switch (paymentData.status) {
+            case 'approved':
+              // Pago aprobado - actualizar base de datos
+              procesarPagoAprobado({
+                platform: 'mercadopago',
+                payment_id: paymentData.id,
+                external_reference: paymentData.external_reference,
+                amount: paymentData.transaction_amount,
+                original_amount_mxn: paymentData.transaction_amount,
+                currency: 'MXN',
+                status: 'approved',
+                payment_method: paymentData.payment_method_id,
+                payer_email: paymentData.payer?.email,
+                service_id: paymentData.metadata?.service_id,
+                patient_id: paymentData.metadata?.patient_id
+              }, (saveErr) => {
+                if (saveErr) {
+                  console.error('Error guardando pago:', saveErr);
+                }
+              });
+              break;
+            
+            case 'rejected':
+              // Pago rechazado
+              procesarPagoRechazado({
+                platform: 'mercadopago',
+                payment_id: paymentData.id,
+                external_reference: paymentData.external_reference,
+                reason: paymentData.status_detail
+              }, (rejectErr) => {
+                if (rejectErr) {
+                  console.error('Error procesando rechazo:', rejectErr);
+                }
+              });
+              break;
+          }
+          
+          res.status(200).send('OK');
+        })
+        .catch(error => {
+          console.error('❌ Error obteniendo pago MercadoPago:', error);
+          res.status(500).send('Error');
+        });
+      });
+    } else {
+      res.status(200).send('OK');
     }
 
-    res.status(200).send('OK');
   } catch (error) {
     console.error('❌ Error en webhook MercadoPago:', error);
     res.status(500).send('Error');
   }
 });
 
-// ============= PAYPAL =============
+// ==================== PAYPAL ====================
 
 // Crear orden de pago en PayPal
-router.post('/paypal/create-order', async (req, res) => {
+router.post('/paypal/create-order', (req, res) => {
   try {
     const { 
       amount, 
       title, 
       reference,
       service_id,
-      patient_id 
+      patient_id,
+      environment = 'sandbox'
     } = req.body;
 
     // Validar datos requeridos
@@ -152,59 +337,104 @@ router.post('/paypal/create-order', async (req, res) => {
       });
     }
 
-    // Convertir MXN a USD
-    const amountUSD = convertMXNToUSD(amount);
-
-    const request = new paypal.orders.OrdersCreateRequest();
-    request.prefer("return=representation");
-    request.requestBody({
-      intent: 'CAPTURE',
-      purchase_units: [{
-        reference_id: reference || `DENTAL_${Date.now()}`,
-        description: title,
-        amount: {
-          currency_code: 'USD',
-          value: amountUSD
-        },
-        custom_id: JSON.stringify({
-          service_id,
-          patient_id,
-          original_amount_mxn: amount
-        })
-      }],
-      application_context: {
-        return_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-success`,
-        cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-cancel`,
-        brand_name: 'Clínica Dental',
-        landing_page: 'BILLING',
-        user_action: 'PAY_NOW'
+    // Obtener configuración dinámica
+    getPayPalConfig(environment, (err, config) => {
+      if (err) return handleQueryError(err, res, "obtener configuración PayPal");
+      
+      if (!config || !config.enabled) {
+        return res.status(400).json({
+          error: 'PayPal no está configurado o habilitado'
+        });
       }
-    });
 
-    const order = await paypalClient.execute(request);
-    
-    console.log('🦷 Orden PayPal creada:', order.result.id);
-    
-    res.json({
-      order_id: order.result.id,
-      status: order.result.status,
-      amount_usd: amountUSD,
-      original_amount_mxn: amount
+      // Obtener token de acceso
+      const auth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
+      
+      axios.post(`${config.baseUrl}/v1/oauth2/token`, 
+        'grant_type=client_credentials',
+        {
+          headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          timeout: 10000
+        }
+      )
+      .then(tokenResponse => {
+        const accessToken = tokenResponse.data.access_token;
+
+        // Convertir MXN a USD
+        const amountUSD = convertMXNToUSD(amount);
+
+        // Crear orden
+        const orderData = {
+          intent: 'CAPTURE',
+          purchase_units: [{
+            reference_id: reference || `DENTAL_${Date.now()}`,
+            description: title,
+            amount: {
+              currency_code: 'USD',
+              value: amountUSD
+            },
+            custom_id: JSON.stringify({
+              service_id,
+              patient_id,
+              original_amount_mxn: amount
+            })
+          }],
+          application_context: {
+            return_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-success`,
+            cancel_url: `${process.env.FRONTEND_URL || 'http://localhost:3000'}/payment-cancel`,
+            brand_name: 'Clínica Dental',
+            landing_page: 'BILLING',
+            user_action: 'PAY_NOW'
+          }
+        };
+
+        axios.post(`${config.baseUrl}/v2/checkout/orders`, orderData, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        })
+        .then(orderResponse => {
+          console.log('🦷 Orden PayPal creada:', orderResponse.data.id);
+          
+          res.json({
+            order_id: orderResponse.data.id,
+            status: orderResponse.data.status,
+            amount_usd: amountUSD,
+            original_amount_mxn: amount,
+            approve_url: orderResponse.data.links?.find(link => link.rel === 'approve')?.href
+          });
+        })
+        .catch(orderError => {
+          console.error('❌ Error creando orden PayPal:', orderError);
+          res.status(500).json({
+            error: 'Error creando orden PayPal',
+            details: orderError.response?.data || orderError.message
+          });
+        });
+      })
+      .catch(tokenError => {
+        console.error('❌ Error obteniendo token PayPal:', tokenError);
+        res.status(500).json({
+          error: 'Error de autenticación PayPal',
+          details: tokenError.response?.data || tokenError.message
+        });
+      });
     });
 
   } catch (error) {
-    console.error('❌ Error creando orden PayPal:', error);
-    res.status(500).json({
-      error: 'Error interno del servidor',
-      details: error.message
-    });
+    handleQueryError(error, res, "crear orden PayPal");
   }
 });
 
 // Capturar pago de PayPal
-router.post('/paypal/capture-order', async (req, res) => {
+router.post('/paypal/capture-order', (req, res) => {
   try {
-    const { orderID } = req.body;
+    const { orderID, environment = 'sandbox' } = req.body;
 
     if (!orderID) {
       return res.status(400).json({
@@ -212,121 +442,187 @@ router.post('/paypal/capture-order', async (req, res) => {
       });
     }
 
-    const request = new paypal.orders.OrdersCaptureRequest(orderID);
-    request.requestBody({});
-
-    const capture = await paypalClient.execute(request);
-    const captureData = capture.result;
-    
-    console.log('💰 Pago PayPal capturado:', captureData.id);
-    
-    // Procesar pago capturado
-    if (captureData.status === 'COMPLETED') {
-      const customData = JSON.parse(captureData.purchase_units[0].custom_id || '{}');
+    // Obtener configuración dinámica
+    getPayPalConfig(environment, (err, config) => {
+      if (err) return handleQueryError(err, res, "obtener configuración PayPal para captura");
       
-      await procesarPagoAprobado({
-        platform: 'paypal',
-        payment_id: captureData.id,
-        external_reference: captureData.purchase_units[0].reference_id,
-        amount: captureData.purchase_units[0].payments.captures[0].amount.value,
-        currency: 'USD',
-        original_amount_mxn: customData.original_amount_mxn,
-        status: 'completed',
-        payment_method: 'paypal',
-        service_id: customData.service_id,
-        patient_id: customData.patient_id
-      });
-    }
+      if (!config || !config.enabled) {
+        return res.status(400).json({
+          error: 'PayPal no está configurado'
+        });
+      }
 
-    res.json(captureData);
+      // Obtener token de acceso
+      const auth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
+      
+      axios.post(`${config.baseUrl}/v1/oauth2/token`, 
+        'grant_type=client_credentials',
+        {
+          headers: {
+            'Authorization': `Basic ${auth}`,
+            'Content-Type': 'application/x-www-form-urlencoded'
+          },
+          timeout: 10000
+        }
+      )
+      .then(tokenResponse => {
+        const accessToken = tokenResponse.data.access_token;
+
+        // Capturar orden
+        axios.post(`${config.baseUrl}/v2/checkout/orders/${orderID}/capture`, {}, {
+          headers: {
+            'Authorization': `Bearer ${accessToken}`,
+            'Content-Type': 'application/json'
+          },
+          timeout: 10000
+        })
+        .then(captureResponse => {
+          const captureData = captureResponse.data;
+          console.log('💰 Pago PayPal capturado:', captureData.id);
+          
+          // Procesar pago capturado
+          if (captureData.status === 'COMPLETED') {
+            const customData = JSON.parse(captureData.purchase_units[0].custom_id || '{}');
+            
+            procesarPagoAprobado({
+              platform: 'paypal',
+              payment_id: captureData.id,
+              external_reference: captureData.purchase_units[0].reference_id,
+              amount: captureData.purchase_units[0].payments.captures[0].amount.value,
+              currency: 'USD',
+              original_amount_mxn: customData.original_amount_mxn,
+              status: 'completed',
+              payment_method: 'paypal',
+              service_id: customData.service_id,
+              patient_id: customData.patient_id
+            }, (saveErr) => {
+              if (saveErr) {
+                console.error('Error guardando pago PayPal:', saveErr);
+              }
+            });
+          }
+
+          res.json(captureData);
+        })
+        .catch(captureError => {
+          console.error('❌ Error capturando orden PayPal:', captureError);
+          res.status(500).json({
+            error: 'Error capturando pago PayPal',
+            details: captureError.response?.data || captureError.message
+          });
+        });
+      })
+      .catch(tokenError => {
+        console.error('❌ Error obteniendo token PayPal para captura:', tokenError);
+        res.status(500).json({
+          error: 'Error de autenticación PayPal',
+          details: tokenError.response?.data || tokenError.message
+        });
+      });
+    });
 
   } catch (error) {
-    console.error('❌ Error capturando orden PayPal:', error);
-    res.status(500).json({
-      error: 'Error interno del servidor',
-      details: error.message
-    });
+    handleQueryError(error, res, "capturar orden PayPal");
   }
 });
 
-// ============= FUNCIONES AUXILIARES =============
+// ==================== ENDPOINTS ADICIONALES ====================
 
-// Procesar pago aprobado
-async function procesarPagoAprobado(paymentData) {
-  try {
-    console.log('✅ Procesando pago aprobado:', paymentData);
-    
-    // Aquí actualizas tu base de datos de finanzas
-    const pagoData = {
-      paciente_id: paymentData.patient_id,
-      cita_id: paymentData.service_id,
-      monto: paymentData.original_amount_mxn || paymentData.amount,
-      subtotal: paymentData.original_amount_mxn || paymentData.amount,
-      total: paymentData.original_amount_mxn || paymentData.amount,
-      concepto: `Pago procesado via ${paymentData.platform}`,
-      metodo_pago: paymentData.platform === 'mercadopago' ? 'MercadoPago' : 'PayPal',
-      estado: 'Pagado',
-      comprobante: paymentData.payment_id,
-      fecha_pago: new Date(),
-      platform_data: JSON.stringify(paymentData)
-    };
-
-    // TODO: Llamar a tu API de finanzas para guardar el pago
-    // const axios = require('axios');
-    // await axios.post('http://localhost:5000/api/Finanzas/Pagos', pagoData);
-    
-    console.log('💾 Pago guardado en base de datos:', pagoData);
-    
-  } catch (error) {
-    console.error('❌ Error procesando pago aprobado:', error);
-  }
-}
-
-// Procesar pago rechazado
-async function procesarPagoRechazado(paymentData) {
-  try {
-    console.log('❌ Pago rechazado:', paymentData);
-    // Aquí puedes notificar al usuario o actualizar el estado
-  } catch (error) {
-    console.error('❌ Error procesando pago rechazado:', error);
-  }
-}
-
-// Obtener estado de pago (Nueva API)
-router.get('/status/:platform/:paymentId', async (req, res) => {
+// Obtener estado de pago
+router.get('/status/:platform/:paymentId', (req, res) => {
   try {
     const { platform, paymentId } = req.params;
+    const { environment = 'sandbox' } = req.query;
 
     if (platform === 'mercadopago') {
-      const { Payment } = require('mercadopago');
-      const { client } = configureMercadoPago();
-      const payment = new Payment(client);
-      
-      const paymentData = await payment.get({ id: paymentId });
-      res.json({
-        status: paymentData.status,
-        amount: paymentData.transaction_amount,
-        payment_method: paymentData.payment_method_id,
-        currency: 'MXN'
+      getMercadoPagoConfig(environment, (err, config) => {
+        if (err) return handleQueryError(err, res, "obtener configuración MercadoPago para status");
+        
+        if (!config) {
+          return res.status(400).json({ error: 'MercadoPago no configurado' });
+        }
+
+        axios.get(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+          headers: {
+            'Authorization': `Bearer ${config.accessToken}`
+          },
+          timeout: 10000
+        })
+        .then(response => {
+          res.json({
+            status: response.data.status,
+            amount: response.data.transaction_amount,
+            payment_method: response.data.payment_method_id,
+            currency: 'MXN'
+          });
+        })
+        .catch(error => {
+          console.error('❌ Error obteniendo estado MercadoPago:', error);
+          res.status(500).json({
+            error: 'Error obteniendo estado de pago',
+            details: error.message
+          });
+        });
       });
     } else if (platform === 'paypal') {
-      const request = new paypal.orders.OrdersGetRequest(paymentId);
-      const order = await paypalClient.execute(request);
-      res.json({
-        status: order.result.status,
-        amount: order.result.purchase_units[0].amount.value,
-        currency: 'USD'
+      getPayPalConfig(environment, (err, config) => {
+        if (err) return handleQueryError(err, res, "obtener configuración PayPal para status");
+        
+        if (!config) {
+          return res.status(400).json({ error: 'PayPal no configurado' });
+        }
+
+        // Obtener token y consultar orden
+        const auth = Buffer.from(`${config.clientId}:${config.clientSecret}`).toString('base64');
+        
+        axios.post(`${config.baseUrl}/v1/oauth2/token`, 
+          'grant_type=client_credentials',
+          {
+            headers: {
+              'Authorization': `Basic ${auth}`,
+              'Content-Type': 'application/x-www-form-urlencoded'
+            },
+            timeout: 10000
+          }
+        )
+        .then(tokenResponse => {
+          const accessToken = tokenResponse.data.access_token;
+
+          axios.get(`${config.baseUrl}/v2/checkout/orders/${paymentId}`, {
+            headers: {
+              'Authorization': `Bearer ${accessToken}`
+            },
+            timeout: 10000
+          })
+          .then(orderResponse => {
+            res.json({
+              status: orderResponse.data.status,
+              amount: orderResponse.data.purchase_units[0].amount.value,
+              currency: 'USD'
+            });
+          })
+          .catch(error => {
+            console.error('❌ Error obteniendo orden PayPal:', error);
+            res.status(500).json({
+              error: 'Error obteniendo estado de orden',
+              details: error.message
+            });
+          });
+        })
+        .catch(error => {
+          console.error('❌ Error obteniendo token PayPal para status:', error);
+          res.status(500).json({
+            error: 'Error de autenticación PayPal',
+            details: error.message
+          });
+        });
       });
     } else {
       res.status(400).json({ error: 'Plataforma no válida' });
     }
 
   } catch (error) {
-    console.error('❌ Error obteniendo estado de pago:', error);
-    res.status(500).json({
-      error: 'Error interno del servidor',
-      details: error.message
-    });
+    handleQueryError(error, res, "obtener estado de pago");
   }
 });
 
@@ -334,9 +630,17 @@ router.get('/status/:platform/:paymentId', async (req, res) => {
 router.get('/test', (req, res) => {
   res.json({
     message: '🦷 API de Pagos Dental funcionando',
-    mercadopago: 'Configurado ✅ (Nueva API)',
-    paypal: 'Configurado ✅',
-    timestamp: new Date().toISOString()
+    mercadopago: 'Configurado dinámicamente ✅',
+    paypal: 'Configurado dinámicamente ✅',
+    timestamp: new Date().toISOString(),
+    endpoints: {
+      mercadopago: '/mercadopago/create-preference, /mercadopago/webhook',
+      paypal: '/paypal/create-order, /paypal/capture-order',
+      status: '/status/:platform/:paymentId',
+      test: '/test'
+    },
+    configuration: 'Usando tabla config_payment ✅',
+    style: 'Callbacks tradicionales ✅'
   });
 });
 
