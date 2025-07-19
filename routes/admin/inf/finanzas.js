@@ -1012,4 +1012,46 @@ router.post('/test-paypal', (req, res) => {
   }
 });
 
+// Endpoint temporal para debug
+router.get('/debug-credentials', (req, res) => {
+  try {
+    const query = `
+      SELECT provider, setting_key, setting_value, is_active, environment 
+      FROM payment_gateway_config 
+      WHERE provider IN ('mercadopago', 'paypal')
+      ORDER BY provider, setting_key
+    `;
+    
+    db.query(query, (err, results) => {
+      if (err) {
+        console.error('Error consultando credenciales:', err);
+        return res.status(500).json({ error: 'Error consultando base de datos' });
+      }
+
+      // Agrupar por proveedor y ocultar datos sensibles
+      const credentials = {};
+      results.forEach(row => {
+        if (!credentials[row.provider]) {
+          credentials[row.provider] = {};
+        }
+        credentials[row.provider][row.setting_key] = {
+          value: row.setting_value ? `${row.setting_value.substring(0, 15)}...` : 'VACÍO',
+          is_active: row.is_active,
+          environment: row.environment,
+          length: row.setting_value ? row.setting_value.length : 0
+        };
+      });
+
+      res.json({
+        success: true,
+        credentials,
+        raw_count: results.length
+      });
+    });
+  } catch (error) {
+    console.error('Error en debug-credentials:', error);
+    res.status(500).json({ error: error.message });
+  }
+});
+
 module.exports = router;
