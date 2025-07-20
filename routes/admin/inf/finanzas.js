@@ -746,33 +746,91 @@ router.get("/estadisticas", (req, res) => {
 // GET - Obtener configuración actual
 router.get('/config', (req, res) => {
   try {
-    const environment = req.query.environment || 'sandbox';
+    const query = `
+      SELECT provider, setting_key, setting_value, environment, is_active 
+      FROM payment_gateway_config 
+      WHERE is_active = 1 AND environment = 'sandbox'
+      ORDER BY provider, setting_key
+    `;
     
-    getPaymentConfig(environment, (err, config) => {
-      if (err) return handleQueryError(err, res, "obtener configuración");
-      
-      // Convertir strings a booleanos donde corresponda
-      const processedConfig = {};
-      Object.keys(config).forEach(provider => {
-        processedConfig[provider] = {};
-        Object.keys(config[provider]).forEach(key => {
-          const value = config[provider][key];
-          if (key === 'enabled') {
-            processedConfig[provider][key] = value === 'true' || value === '1';
-          } else {
-            processedConfig[provider][key] = value || '';
-          }
+    db.query(query, (err, results) => {
+      if (err) {
+        console.error('Error consultando configuración:', err);
+        return res.status(500).json({ 
+          error: 'Error consultando configuración',
+          details: err.message 
         });
+      }
+
+      // Construir objeto de configuración
+      const config = {
+        mercadopago: {
+          enabled: false,
+          access_token: '',
+          public_key: '',
+          webhook_url: '',
+          mode: 'sandbox'
+        },
+        paypal: {
+          enabled: false,
+          client_id: '',
+          client_secret: '',
+          webhook_url: '',
+          mode: 'sandbox'
+        }
+      };
+
+      // Llenar configuración desde BD
+      results.forEach(row => {
+        if (row.provider === 'mercadopago') {
+          if (row.setting_key === 'enabled') {
+            config.mercadopago.enabled = row.setting_value === 'true';
+          } else if (row.setting_key === 'access_token') {
+            config.mercadopago.access_token = row.setting_value || '';
+          } else if (row.setting_key === 'public_key') {
+            config.mercadopago.public_key = row.setting_value || '';
+          } else if (row.setting_key === 'webhook_url') {
+            config.mercadopago.webhook_url = row.setting_value || '';
+          } else if (row.setting_key === 'mode') {
+            config.mercadopago.mode = row.setting_value || 'sandbox';
+          }
+        } else if (row.provider === 'paypal') {
+          if (row.setting_key === 'enabled') {
+            config.paypal.enabled = row.setting_value === 'true';
+          } else if (row.setting_key === 'client_id') {
+            config.paypal.client_id = row.setting_value || '';
+          } else if (row.setting_key === 'client_secret') {
+            config.paypal.client_secret = row.setting_value || '';
+          } else if (row.setting_key === 'webhook_url') {
+            config.paypal.webhook_url = row.setting_value || '';
+          } else if (row.setting_key === 'mode') {
+            config.paypal.mode = row.setting_value || 'sandbox';
+          }
+        }
       });
-      
+
+      console.log('✅ Configuración cargada desde BD:', {
+        mercadopago: {
+          enabled: config.mercadopago.enabled,
+          has_token: !!config.mercadopago.access_token,
+          has_key: !!config.mercadopago.public_key
+        },
+        paypal: {
+          enabled: config.paypal.enabled,
+          has_client_id: !!config.paypal.client_id,
+          has_secret: !!config.paypal.client_secret
+        }
+      });
+
       res.json({
         success: true,
-        environment: environment,
-        config: processedConfig
+        environment: 'sandbox',
+        config: config
       });
     });
   } catch (error) {
-    handleQueryError(error, res, "consulta de configuración");
+    console.error('Error en /config:', error);
+    res.status(500).json({ error: error.message });
   }
 });
 

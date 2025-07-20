@@ -33,7 +33,7 @@ const getPaymentSetting = (provider, settingKey, environment = 'sandbox', callba
 };
 
 // Función para obtener configuración completa de MercadoPago
-const getMercadoPagoConfig = (environment = 'sandbox', callback) => {
+const getMercadoPagoConfig = (environment = 'production', callback) => {
   getPaymentConfig(environment, (err, config) => {
     if (err) return callback(err, null);
 
@@ -455,7 +455,7 @@ router.post('/mercadopago/create-preference', (req, res) => {
     }
 
     // Obtener configuración dinámica
-    getMercadoPagoConfig(environment, (err, config) => {
+    getMercadoPagoConfig(environment || 'production', (err, config) => {
       if (err) return handleQueryError(err, res, "obtener configuración MercadoPago");
       
       if (!config || !config.enabled) {
@@ -533,7 +533,7 @@ router.post('/mercadopago/webhook', (req, res) => {
 
     if (type === 'payment') {
       // Obtener configuración dinámica
-      getMercadoPagoConfig('sandbox', (err, config) => {
+      getMercadoPagoConfig('production', (err, config) => {
         if (err || !config) {
           console.error('Configuración de MercadoPago no disponible');
           return res.status(500).send('Config Error');
@@ -824,7 +824,7 @@ router.get('/status/:platform/:paymentId', (req, res) => {
     const { environment = 'sandbox' } = req.query;
 
     if (platform === 'mercadopago') {
-      getMercadoPagoConfig(environment, (err, config) => {
+      getMercadoPagoConfig(environment || 'production', (err, config) => {
         if (err) return handleQueryError(err, res, "obtener configuración MercadoPago para status");
         
         if (!config) {
