@@ -2,9 +2,6 @@ const express = require("express");
 const router = express.Router();
 const db = require("../../db");
 const xss = require("xss");
-const moment = require("moment-timezone");
-const logger = require('../../utils/logger');
-
 
 // Ruta POST: /loginalexa
 router.post("/loginalexa", (req, res) => {
@@ -38,61 +35,57 @@ router.post("/loginalexa", (req, res) => {
   });
 });
 
+// Nueva ruta POST: /agendarcita
+router.post("/agendarcita", (req, res) => {
+  const { paciente_id, nombre, servicio, precio, fecha_de_cita } = req.body;
 
-router.post("/agendarcita", async (req, res) => {
-  const {
-    paciente_id,
-    nombre,
-    servicio_id,
-    servicio_nombre,
-    precio_servicio,
-    fecha_consulta
-  } = req.body;
-
-  // Validar campos obligatorios
-  if (!paciente_id || !nombre || !servicio_id || !servicio_nombre || !precio_servicio || !fecha_consulta) {
-    return res.status(400).json({ message: "Faltan datos requeridos." });
+  // Validar los datos recibidos
+  if (!paciente_id || !nombre || !servicio || !precio || !fecha_de_cita) {
+    return res.status(400).json({ message: "Todos los campos son requeridos." });
   }
 
-  // Validar formato de fecha: YYYY-MM-DD HH:mm:ss
+  // Sanitizar los inputs
+  const sanitizedNombre = xss(nombre);
+  const sanitizedServicio = xss(servicio);
+  const sanitizedFecha = xss(fecha_de_cita);
+
+  // Validar formato de fecha (puede ajustarse según necesidades)
   const dateRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
-  if (!dateRegex.test(fecha_consulta)) {
+  if (!dateRegex.test(sanitizedFecha)) {
     return res.status(400).json({ message: "Formato de fecha inválido. Usa YYYY-MM-DD HH:MM:SS." });
   }
 
-  try {
-    // Sanitizar entradas
-    const sanitizedNombre = xss(nombre);
-    const sanitizedServicioNombre = xss(servicio_nombre);
-    const sanitizedFecha = xss(fecha_consulta);
+  // Validar que el paciente_id existe (opcional, dependiendo de tu lógica)
+  const checkPatientSql = "SELECT id FROM pacientes WHERE id = ?";
+  db.query(checkPatientSql, [paciente_id], (err, result) => {
+    if (err) {
+      return res.status(500).json({ message: "Error del servidor." });
+    }
+    if (result.length === 0) {
+      return res.status(404).json({ message: "Paciente no encontrado." });
+    }
 
-    const insertSql = `
-      INSERT INTO citas (paciente_id, nombre, servicio_id, servicio_nombre, precio_servicio, fecha_consulta)
-      VALUES (?, ?, ?, ?, ?, ?)
-    `;
-
-    db.query(insertSql, [
-      paciente_id,
-      sanitizedNombre,
-      servicio_id,
-      sanitizedServicioNombre,
-      precio_servicio,
-      sanitizedFecha
-    ], (err, result) => {
+    // Insertar la cita en la base de datos
+    const insertSql = "INSERT INTO citasAlexa (paciente_id, nombre, servicio, precio, fecha_de_cita) VALUES (?, ?, ?, ?, ?)";
+    db.query(insertSql, [paciente_id, sanitizedNombre, sanitizedServicio, precio, sanitizedFecha], (err, result) => {
       if (err) {
-        console.error("Error al agendar cita:", err.sqlMessage);
-        return res.status(500).json({ message: "Error al agendar la cita.", error: err.sqlMessage });
+        console.error("Error al agendar cita:", err);
+        return res.status(500).json({ message: "Error al agendar la cita." });
       }
 
-      res.status(201).json({ message: "Cita agendada exitosamente.", cita_id: result.insertId });
+      return res.status(201).json({
+        message: "Cita agendada exitosamente.",
+        cita: {
+          id: result.insertId,
+          paciente_id,
+          nombre: sanitizedNombre,
+          servicio: sanitizedServicio,
+          precio,
+          fecha_de_cita: sanitizedFecha
+        }
+      });
     });
-
-  } catch (error) {
-    console.error("Error en servidor:", error);
-    res.status(500).json({ message: "Error del servidor." });
-  }
+  });
 });
-
-
 
 module.exports = router;
