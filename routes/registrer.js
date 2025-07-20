@@ -174,27 +174,32 @@ router.post('/register', async (req, res) => {
     }
 });
 
-// Endpoint para solicitar la recuperación de contraseña
+// Endpoint para solicitar la recuperación de contraseña - Soporta múltiples tipos de usuario
 router.post('/recuperacion', async (req, res) => {
     const { email } = req.body;
-
-    // Limitar solicitudes de recuperación por dirección IP
     const ipAddress = req.ip;
 
     try {
-        // Limitar los intentos de recuperación de contraseña desde la misma IP
         await rateLimiter.consume(ipAddress);
         logger.info(`Intento de recuperación de contraseña para el email: ${email} desde la IP: ${ipAddress}`);
 
-        // Validar formato de correo electrónico
         if (!validateEmail(email)) {
             return res.status(400).json({ message: 'Formato de correo inválido.' });
         }
 
-        // Verificar si el correo existe en la base de datos
-        const checkUserSql = 'SELECT * FROM pacientes WHERE email = ?';
-        db.query(checkUserSql, [xss(email)], (err, result) => {
+        // Buscar usuario en las tres tablas
+        const findUserQuery = `
+            SELECT 'pacientes' as tabla, id, email FROM pacientes WHERE email = ?
+            UNION
+            SELECT 'empleados' as tabla, id, email FROM empleados WHERE email = ?
+            UNION  
+            SELECT 'administradores' as tabla, id, email FROM administradores WHERE email = ?
+            LIMIT 1
+        `;
+
+        db.query(findUserQuery, [email, email, email], (err, result) => {
             if (err) {
+                logger.error('Error al buscar usuario:', err);
                 return res.status(500).json({ message: 'Error al verificar el correo electrónico.' });
             }
 
@@ -202,18 +207,26 @@ router.post('/recuperacion', async (req, res) => {
                 return res.status(404).json({ message: 'No existe una cuenta con este correo electrónico.' });
             }
 
-            // Generar un token de recuperación utilizando el campo token_verificacion
+            const { tabla } = result[0];
             const token = generateToken();
-            const tokenExpiration = new Date(Date.now() + 900000); // Expira en 15 minutos
+            const tokenExpiration = new Date(Date.now() + 900000);
 
-            // Actualizar la base de datos con el token de verificación y la expiración
-            const updateTokenSql = 'UPDATE pacientes SET token_verificacion = ?, token_expiracion = ? WHERE email = ?';
-            db.query(updateTokenSql, [token, tokenExpiration, email], (err, result) => {
+            // Validar tabla para prevenir inyección SQL
+            const validTables = ['pacientes', 'empleados', 'administradores'];
+            if (!validTables.includes(tabla)) {
+                return res.status(500).json({ message: 'Error de seguridad.' });
+            }
+
+            // Actualizar la tabla correspondiente
+            const updateTokenSql = `UPDATE ${tabla} SET token_verificacion = ?, token_expiracion = ? WHERE email = ?`;
+            
+            db.query(updateTokenSql, [token, tokenExpiration, email], (err, updateResult) => {
                 if (err) {
+                    logger.error('Error al actualizar token:', err);
                     return res.status(500).json({ message: 'Error al generar el token de recuperación.' });
                 }
 
-                // Formatear el contenido HTML del correo de recuperación de contraseña
+                // Configuración del correo
                 const mailOptions = {
                     from: '"Odontología Carol" <sistema@odontologiacarol.com>',
                     to: email,
@@ -257,18 +270,16 @@ router.post('/recuperacion', async (req, res) => {
                         logger.error('Error al enviar el correo de recuperación:', err);
                         return res.status(500).json({ message: 'Error al enviar el correo de recuperación.' });
                     }
-                    logger.info(`Correo de recuperación enviado correctamente a: ${email}`);
+                    logger.info(`Correo de recuperación enviado correctamente a: ${email} (tipo: ${tabla})`);
                     res.status(200).json({ message: 'Se ha enviado un enlace de recuperación a tu correo.' });
                 });
             });
         });
     } catch (rateLimiterError) {
         logger.warn(`Demasiados intentos de recuperación de contraseña desde la IP: ${ipAddress}`);
-
         return res.status(429).json({ message: 'Demasiados intentos. Inténtalo más tarde.' });
     }
 });
-
 // Validar formato del correo electrónico
 function validateEmail(email) {
     const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@(([^<>()[\]\\.,;:\s@"]+\.)+[^<>()[\]\\.,;:\s@"]{2,})$/i;
