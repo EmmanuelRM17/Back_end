@@ -748,7 +748,7 @@ router.get('/config', (req, res) => {
   try {
     const query = `
       SELECT provider, setting_key, setting_value, environment, is_active 
-      FROM payment_gateway_config 
+      FROM config_payment 
       WHERE is_active = 1 AND environment = 'sandbox'
       ORDER BY provider, setting_key
     `;
@@ -1075,7 +1075,7 @@ router.get('/debug-credentials', (req, res) => {
   try {
     const query = `
       SELECT provider, setting_key, setting_value, is_active, environment 
-      FROM payment_gateway_config 
+      FROM config_payment 
       WHERE provider IN ('mercadopago', 'paypal')
       ORDER BY provider, setting_key
     `;
