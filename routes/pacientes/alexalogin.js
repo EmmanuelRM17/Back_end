@@ -64,7 +64,7 @@ router.post("/agendarcita", async (req, res) => {
     }
 
     // Verificar existencia del paciente
-    const [pacienteRows] = await db.promise().query("SELECT * FROM paciente WHERE id = ?", [paciente_id]);
+    const [pacienteRows] = await db.promise().query("SELECT * FROM pacientes WHERE id = ?", [paciente_id]);
     if (pacienteRows.length === 0) {
       return res.status(404).json({ message: "Paciente no encontrado." });
     }
