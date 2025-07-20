@@ -187,92 +187,98 @@ router.post('/recuperacion', async (req, res) => {
             return res.status(400).json({ message: 'Formato de correo inválido.' });
         }
 
-        // Buscar usuario en las tres tablas
-        const findUserQuery = `
-            SELECT 'pacientes' as tabla, id, email FROM pacientes WHERE email = ?
-            UNION
-            SELECT 'empleados' as tabla, id, email FROM empleados WHERE email = ?
-            UNION  
-            SELECT 'administradores' as tabla, id, email FROM administradores WHERE email = ?
-            LIMIT 1
-        `;
-
-        db.query(findUserQuery, [email, email, email], (err, result) => {
-            if (err) {
-                logger.error('Error al buscar usuario:', err);
-                return res.status(500).json({ message: 'Error al verificar el correo electrónico.' });
-            }
-
-            if (result.length === 0) {
-                return res.status(404).json({ message: 'No existe una cuenta con este correo electrónico.' });
-            }
-
-            const { tabla } = result[0];
-            const token = generateToken();
-            const tokenExpiration = new Date(Date.now() + 900000);
-
-            // Validar tabla para prevenir inyección SQL
-            const validTables = ['pacientes', 'empleados', 'administradores'];
-            if (!validTables.includes(tabla)) {
-                return res.status(500).json({ message: 'Error de seguridad.' });
-            }
-
-            // Actualizar la tabla correspondiente
-            const updateTokenSql = `UPDATE ${tabla} SET token_verificacion = ?, token_expiracion = ? WHERE email = ?`;
+        // Buscar usuario en las tres tablas secuencialmente
+        const searchUser = async () => {
+            const tables = ['pacientes', 'empleados', 'administradores'];
             
-            db.query(updateTokenSql, [token, tokenExpiration, email], (err, updateResult) => {
-                if (err) {
-                    logger.error('Error al actualizar token:', err);
-                    return res.status(500).json({ message: 'Error al generar el token de recuperación.' });
+            for (const tabla of tables) {
+                const query = `SELECT id, email FROM ${tabla} WHERE email = ?`;
+                
+                try {
+                    const result = await new Promise((resolve, reject) => {
+                        db.query(query, [email], (err, rows) => {
+                            if (err) reject(err);
+                            else resolve(rows);
+                        });
+                    });
+                    
+                    if (result.length > 0) {
+                        return { tabla, user: result[0] };
+                    }
+                } catch (queryErr) {
+                    logger.error(`Error buscando en tabla ${tabla}:`, queryErr);
+                    continue;
                 }
+            }
+            
+            return null;
+        };
 
-                // Configuración del correo
-                const mailOptions = {
-                    from: '"Odontología Carol" <sistema@odontologiacarol.com>',
-                    to: email,
-                    subject: 'Recuperación de Contraseña - Odontología Carol',
-                    html: `
-                        <div style="font-family: 'Roboto', Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; background-color: #fafafa;">
-                            <div style="background-color: #1976d2; padding: 20px; text-align: center; border-radius: 4px 4px 0 0;">
-                                <h1 style="color: white; margin: 0; font-weight: 500; font-size: 22px;">Odontología Carol</h1>
-                            </div>
-                            <div style="padding: 30px 40px; background-color: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-radius: 0 0 4px 4px;">
-                                <p style="font-size: 16px; margin: 0 0 20px;">¡Hola!</p>
-                                <p style="font-size: 16px; margin: 0 0 15px; line-height: 1.5;">Hemos recibido una solicitud para restablecer tu contraseña en <b>Odontología Carol</b>.</p>
-                                <p style="font-size: 16px; margin: 0 0 20px; line-height: 1.5;">Si no realizaste esta solicitud, puedes ignorar este correo. De lo contrario, utiliza el siguiente código para restablecer tu contraseña:</p>
-                                
-                                <div style="text-align: center;">
-                                    <div style="padding: 15px 25px; background-color: #e3f2fd; border-radius: 8px; display: inline-block; margin: 25px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
-                                        <span style="font-size: 28px; font-weight: 500; color: #1976d2; letter-spacing: 2px;">${token}</span>
-                                    </div>
+        const userFound = await searchUser();
+        
+        if (!userFound) {
+            return res.status(404).json({ message: 'No existe una cuenta con este correo electrónico.' });
+        }
+
+        const { tabla } = userFound;
+        const token = generateToken();
+        const tokenExpiration = new Date(Date.now() + 900000);
+
+        // Actualizar la tabla correspondiente
+        const updateTokenSql = `UPDATE ${tabla} SET token_verificacion = ?, token_expiracion = ? WHERE email = ?`;
+        
+        db.query(updateTokenSql, [token, tokenExpiration, email], (err, updateResult) => {
+            if (err) {
+                logger.error('Error al actualizar token:', err);
+                return res.status(500).json({ message: 'Error al generar el token de recuperación.' });
+            }
+
+            // Configuración del correo
+            const mailOptions = {
+                from: '"Odontología Carol" <sistema@odontologiacarol.com>',
+                to: email,
+                subject: 'Recuperación de Contraseña - Odontología Carol',
+                html: `
+                    <div style="font-family: 'Roboto', Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; background-color: #fafafa;">
+                        <div style="background-color: #1976d2; padding: 20px; text-align: center; border-radius: 4px 4px 0 0;">
+                            <h1 style="color: white; margin: 0; font-weight: 500; font-size: 22px;">Odontología Carol</h1>
+                        </div>
+                        <div style="padding: 30px 40px; background-color: white; box-shadow: 0 2px 5px rgba(0,0,0,0.1); border-radius: 0 0 4px 4px;">
+                            <p style="font-size: 16px; margin: 0 0 20px;">¡Hola!</p>
+                            <p style="font-size: 16px; margin: 0 0 15px; line-height: 1.5;">Hemos recibido una solicitud para restablecer tu contraseña en <b>Odontología Carol</b>.</p>
+                            <p style="font-size: 16px; margin: 0 0 20px; line-height: 1.5;">Si no realizaste esta solicitud, puedes ignorar este correo. De lo contrario, utiliza el siguiente código para restablecer tu contraseña:</p>
+                            
+                            <div style="text-align: center;">
+                                <div style="padding: 15px 25px; background-color: #e3f2fd; border-radius: 8px; display: inline-block; margin: 25px 0; box-shadow: 0 1px 3px rgba(0,0,0,0.1);">
+                                    <span style="font-size: 28px; font-weight: 500; color: #1976d2; letter-spacing: 2px;">${token}</span>
                                 </div>
-                                
-                                <div style="margin: 25px 0; padding: 15px; background-color: #fff8e1; border-left: 4px solid #d32f2f; border-radius: 4px;">
-                                    <p style="color: #d32f2f; font-weight: 500; font-size: 14px; margin: 0; line-height: 1.4;">
-                                        <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d32f2f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
-                                        Importante: El token debe ser copiado tal y como está, respetando los números y mayúsculas.
-                                    </p>
-                                </div>
-                                
-                                <p style="font-size: 14px; color: #616161; margin: 20px 0; padding: 10px; background-color: #f5f5f5; border-radius: 4px;"><b>Nota:</b> Este código caduca en 15 minutos por seguridad.</p>
                             </div>
                             
-                            <div style="text-align: center; padding: 20px; color: #757575; font-size: 13px; border-top: 1px solid #eaeaea;">
-                                <p style="margin: 0 0 5px;">Odontología Carol - Cuidando de tu salud bucal</p>
-                                <p style="margin: 0; color: #9e9e9e;">Este es un correo generado automáticamente, por favor no respondas a este mensaje.</p>
+                            <div style="margin: 25px 0; padding: 15px; background-color: #fff8e1; border-left: 4px solid #d32f2f; border-radius: 4px;">
+                                <p style="color: #d32f2f; font-weight: 500; font-size: 14px; margin: 0; line-height: 1.4;">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#d32f2f" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align: middle; margin-right: 5px;"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                                    Importante: El token debe ser copiado tal y como está, respetando los números y mayúsculas.
+                                </p>
                             </div>
+                            
+                            <p style="font-size: 14px; color: #616161; margin: 20px 0; padding: 10px; background-color: #f5f5f5; border-radius: 4px;"><b>Nota:</b> Este código caduca en 15 minutos por seguridad.</p>
                         </div>
-                    `,
-                };
+                        
+                        <div style="text-align: center; padding: 20px; color: #757575; font-size: 13px; border-top: 1px solid #eaeaea;">
+                            <p style="margin: 0 0 5px;">Odontología Carol - Cuidando de tu salud bucal</p>
+                            <p style="margin: 0; color: #9e9e9e;">Este es un correo generado automáticamente, por favor no respondas a este mensaje.</p>
+                        </div>
+                    </div>
+                `,
+            };
 
-                transporter.sendMail(mailOptions, (err, info) => {
-                    if (err) {
-                        logger.error('Error al enviar el correo de recuperación:', err);
-                        return res.status(500).json({ message: 'Error al enviar el correo de recuperación.' });
-                    }
-                    logger.info(`Correo de recuperación enviado correctamente a: ${email} (tipo: ${tabla})`);
-                    res.status(200).json({ message: 'Se ha enviado un enlace de recuperación a tu correo.' });
-                });
+            transporter.sendMail(mailOptions, (err, info) => {
+                if (err) {
+                    logger.error('Error al enviar el correo de recuperación:', err);
+                    return res.status(500).json({ message: 'Error al enviar el correo de recuperación.' });
+                }
+                logger.info(`Correo de recuperación enviado correctamente a: ${email} (tipo: ${tabla})`);
+                res.status(200).json({ message: 'Se ha enviado un enlace de recuperación a tu correo.' });
             });
         });
     } catch (rateLimiterError) {
@@ -280,6 +286,7 @@ router.post('/recuperacion', async (req, res) => {
         return res.status(429).json({ message: 'Demasiados intentos. Inténtalo más tarde.' });
     }
 });
+
 // Validar formato del correo electrónico
 function validateEmail(email) {
     const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@(([^<>()[\]\\.,;:\s@"]+\.)+[^<>()[\]\\.,;:\s@"]{2,})$/i;
