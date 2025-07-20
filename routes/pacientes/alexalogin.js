@@ -88,4 +88,50 @@ router.post("/agendarcita", (req, res) => {
   });
 });
 
+// Nueva ruta GET: /getAppointment
+router.get("/getAppointment", (req, res) => {
+  const telefono = xss(req.query.telefono); // Sanitiza el input
+
+  if (!telefono) {
+    return res.status(400).json({ message: "Proporciona un número de teléfono." });
+  }
+
+  // Consultar el paciente_id basado en el teléfono
+  const getPatientSql = "SELECT id FROM pacientes WHERE telefono = ?";
+  db.query(getPatientSql, [telefono], (err, patientResult) => {
+    if (err) {
+      return res.status(500).json({ message: "Error del servidor." });
+    }
+
+    if (patientResult.length === 0) {
+      return res.status(404).json({ message: "Teléfono no registrado." });
+    }
+
+    const pacienteId = patientResult[0].id;
+
+    // Consultar la cita más reciente para el paciente
+    const getAppointmentSql = "SELECT nombre, servicio, precio, fecha_de_cita FROM citasAlexa WHERE paciente_id = ? ORDER BY fecha_de_cita DESC LIMIT 1";
+    db.query(getAppointmentSql, [pacienteId], (err, appointmentResult) => {
+      if (err) {
+        return res.status(500).json({ message: "Error al consultar la cita." });
+      }
+
+      if (appointmentResult.length === 0) {
+        return res.status(404).json({ message: "No se encontró una cita para este teléfono." });
+      }
+
+      const { nombre, servicio, precio, fecha_de_cita } = appointmentResult[0];
+
+      return res.status(200).json({
+        message: "Cita encontrada",
+        nombre: nombre,
+        servicio: servicio,
+        precio: precio,
+        fecha_de_cita: fecha_de_cita
+      });
+    });
+  });
+});
+
+
 module.exports = router;
