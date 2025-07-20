@@ -43,13 +43,14 @@ router.post("/agendarcita", async (req, res) => {
   const {
     paciente_id,
     nombre,
+    servicio_id,
     servicio_nombre,
     precio_servicio,
     fecha_consulta
   } = req.body;
 
-  // Validar campos
-  if (!paciente_id || !nombre || !servicio_nombre || !precio_servicio || !fecha_consulta) {
+  // Validar campos obligatorios
+  if (!paciente_id || !nombre || !servicio_id || !servicio_nombre || !precio_servicio || !fecha_consulta) {
     return res.status(400).json({ message: "Faltan datos requeridos." });
   }
 
@@ -60,19 +61,21 @@ router.post("/agendarcita", async (req, res) => {
   }
 
   try {
+    // Sanitizar entradas
     const sanitizedNombre = xss(nombre);
-    const sanitizedServicio = xss(servicio_nombre);
+    const sanitizedServicioNombre = xss(servicio_nombre);
     const sanitizedFecha = xss(fecha_consulta);
 
     const insertSql = `
-      INSERT INTO citas (paciente_id, nombre, servicio_nombre, precio_servicio, fecha_consulta)
-      VALUES (?, ?, ?, ?, ?)
+      INSERT INTO citas (paciente_id, nombre, servicio_id, servicio_nombre, precio_servicio, fecha_consulta)
+      VALUES (?, ?, ?, ?, ?, ?)
     `;
 
     db.query(insertSql, [
       paciente_id,
       sanitizedNombre,
-      sanitizedServicio,
+      servicio_id,
+      sanitizedServicioNombre,
       precio_servicio,
       sanitizedFecha
     ], (err, result) => {
@@ -89,6 +92,7 @@ router.post("/agendarcita", async (req, res) => {
     res.status(500).json({ message: "Error del servidor." });
   }
 });
+
 
 
 module.exports = router;
