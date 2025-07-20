@@ -39,58 +39,56 @@ router.post("/loginalexa", (req, res) => {
 });
 
 
-// POST /agendarcita
-router.post("/agendarcita", (req, res) => {
-  const { paciente_id, nombre, servicio, precio, fecha_de_cita } = req.body;
+router.post("/agendarcita", async (req, res) => {
+  const {
+    paciente_id,
+    nombre,
+    servicio_nombre,
+    precio_servicio,
+    fecha_consulta
+  } = req.body;
 
-  // Validar datos obligatorios
-  if (!paciente_id || !nombre || !servicio || !precio || !fecha_de_cita) {
-    return res.status(400).json({ message: "Todos los campos son requeridos." });
+  // Validar campos
+  if (!paciente_id || !nombre || !servicio_nombre || !precio_servicio || !fecha_consulta) {
+    return res.status(400).json({ message: "Faltan datos requeridos." });
   }
 
-  // Sanitizar entradas
-  const sanitizedNombre = xss(nombre);
-  const sanitizedServicio = xss(servicio);
-  const sanitizedFecha = xss(fecha_de_cita);
-
-  // Validar formato fecha: YYYY-MM-DD HH:mm:ss
+  // Validar formato de fecha: YYYY-MM-DD HH:mm:ss
   const dateRegex = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/;
-  if (!dateRegex.test(sanitizedFecha)) {
+  if (!dateRegex.test(fecha_consulta)) {
     return res.status(400).json({ message: "Formato de fecha inválido. Usa YYYY-MM-DD HH:MM:SS." });
   }
 
-  // Verificar que el paciente existe
-  const checkPatientSql = "SELECT id FROM pacientes WHERE id = ?";
-  db.query(checkPatientSql, [paciente_id], (err, result) => {
-    if (err) {
-      console.error("Error al buscar paciente:", err);
-      return res.status(500).json({ message: "Error del servidor." });
-    }
-    if (result.length === 0) {
-      return res.status(404).json({ message: "Paciente no encontrado." });
-    }
+  try {
+    const sanitizedNombre = xss(nombre);
+    const sanitizedServicio = xss(servicio_nombre);
+    const sanitizedFecha = xss(fecha_consulta);
 
-    // Insertar cita
-    const insertSql = "INSERT INTO citas (paciente_id, nombre, servicio, precio, fecha_de_cita) VALUES (?, ?, ?, ?, ?)";
-    db.query(insertSql, [paciente_id, sanitizedNombre, sanitizedServicio, precio, sanitizedFecha], (err, result) => {
+    const insertSql = `
+      INSERT INTO citas (paciente_id, nombre, servicio_nombre, precio_servicio, fecha_consulta)
+      VALUES (?, ?, ?, ?, ?)
+    `;
+
+    db.query(insertSql, [
+      paciente_id,
+      sanitizedNombre,
+      sanitizedServicio,
+      precio_servicio,
+      sanitizedFecha
+    ], (err, result) => {
       if (err) {
-        console.error("Error al agendar cita:", err);
-        return res.status(500).json({ message: "Error al agendar la cita." });
+        console.error("Error al agendar cita:", err.sqlMessage);
+        return res.status(500).json({ message: "Error al agendar la cita.", error: err.sqlMessage });
       }
 
-      res.status(201).json({
-        message: "Cita agendada exitosamente.",
-        cita: {
-          id: result.insertId,
-          paciente_id,
-          nombre: sanitizedNombre,
-          servicio: sanitizedServicio,
-          precio,
-          fecha_de_cita: sanitizedFecha
-        }
-      });
+      res.status(201).json({ message: "Cita agendada exitosamente.", cita_id: result.insertId });
     });
-  });
+
+  } catch (error) {
+    console.error("Error en servidor:", error);
+    res.status(500).json({ message: "Error del servidor." });
+  }
 });
+
 
 module.exports = router;
