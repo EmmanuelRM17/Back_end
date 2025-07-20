@@ -1041,7 +1041,7 @@ router.post("/test-mercadopago", (req, res) => {
             // Probar la conexión con axios
             const axios = require("axios");
             axios
-              .get("https://api.mercadopago.com/v1/users/me", {
+              .get("https://api.mercadopago.com/v1/payment_methods", {
                 headers: {
                   Authorization: `Bearer ${accessToken}`,
                   "Content-Type": "application/json",
