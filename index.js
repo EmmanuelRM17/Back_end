@@ -76,6 +76,7 @@ const p_perfil = require("./routes/pacientes/perfil")
 const loginalexa =require("./routes/pacientes/alexalogin.js")
 const whatsappRouter = require('./routes/whatsapp');
 
+const mlPredictions = require("./routes/admin/predictions");
 
 // Asignar rutas
 app.use("/api", Registrer);
@@ -112,7 +113,7 @@ app.use("/api/profile", p_perfil);
 app.use("/api/paciente/", loginalexa)
 
 app.use('/api/whatsapp', whatsappRouter);
-
+app.use("/api/ml", mlPredictions);
 
 app.listen(3001, () => {
   console.log("Servidor corriendo en puerto 3001");
