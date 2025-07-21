@@ -17,6 +17,29 @@ except Exception as e:
     print(f"Error cargando modelo: {e}", file=sys.stderr)
     model = None
 
+# Función para convertir valores a números de forma segura
+def safe_float(value, default=0.0):
+    """Convierte un valor a float de forma segura"""
+    if value is None:
+        return default
+    try:
+        if isinstance(value, (int, float)):
+            return float(value)
+        return float(str(value).strip())
+    except (ValueError, TypeError):
+        return default
+
+def safe_int(value, default=0):
+    """Convierte un valor a int de forma segura"""
+    if value is None:
+        return default
+    try:
+        if isinstance(value, (int, float)):
+            return int(value)
+        return int(float(str(value).strip()))
+    except (ValueError, TypeError):
+        return default
+
 def calculate_age(birth_date):
     """Calcular edad a partir de fecha de nacimiento"""
     if not birth_date:
@@ -41,8 +64,17 @@ def calculate_lead_time(fecha_solicitud, fecha_consulta):
 
 def get_category_code(category):
     """Mapear categorías a códigos numéricos"""
-    categories = {'General': 0, 'Especialidad': 1, 'Urgencia': 2}
-    return categories.get(category, 0)
+    if not category:
+        return 0
+    
+    categories = {
+        'General': 0, 
+        'Especialidad': 1, 
+        'Urgencia': 2,
+        'Protesis': 1,  # Mapear Prótesis como Especialidad
+        'Prótesis': 1   # Con acento también
+    }
+    return categories.get(str(category).strip(), 0)
 
 def extract_features(cita_data):
     """Extraer features del modelo a partir de datos de cita"""
@@ -59,25 +91,26 @@ def extract_features(cita_data):
         cita_data.get('fecha_consulta')
     )
     
+    # Convertir todos los valores numéricos de forma segura
     features = {
         'edad': edad,
-        'genero': 1 if cita_data.get('paciente_genero') == 'Masculino' else 0,
+        'genero': 1 if str(cita_data.get('paciente_genero', '')).strip() == 'Masculino' else 0,
         'alergias_flag': 1 if cita_data.get('paciente_alergias') else 0,
-        'registro_completo': 1 if cita_data.get('paciente_registro_completo', True) else 0,
-        'verificado': 1 if cita_data.get('paciente_verificado', True) else 0,
+        'registro_completo': safe_int(cita_data.get('paciente_registro_completo', True), 1),
+        'verificado': safe_int(cita_data.get('paciente_verificado', True), 1),
         'lead_time_days': lead_time_days,
         'dow': fecha_consulta.weekday() + 1,  # 1=Lunes, 7=Domingo
         'hour': fecha_consulta.hour,
         'is_weekend': 1 if fecha_consulta.weekday() >= 5 else 0,
         'categoria_servicio': get_category_code(cita_data.get('categoria_servicio', 'General')),
-        'precio_servicio': float(cita_data.get('precio_servicio', 0)),
-        'duration_min': int(cita_data.get('duracion', 30)),
-        'paid_flag': 1 if cita_data.get('estado_pago') == 'Pagado' else 0,
-        'tratamiento_pendiente': 1 if cita_data.get('tratamiento_pendiente') else 0,
-        'total_citas': cita_data.get('total_citas_historicas', 1),
-        'total_no_shows': cita_data.get('total_no_shows_historicas', 0),
-        'pct_no_show_historico': cita_data.get('pct_no_show_historico', 0.0),
-        'dias_desde_ultima_cita': cita_data.get('dias_desde_ultima_cita', 0)
+        'precio_servicio': safe_float(cita_data.get('precio_servicio', 0)),
+        'duration_min': safe_int(cita_data.get('duracion', 30)),
+        'paid_flag': 1 if str(cita_data.get('estado_pago', '')).strip() == 'Pagado' else 0,
+        'tratamiento_pendiente': safe_int(cita_data.get('tratamiento_pendiente', 0)),
+        'total_citas': safe_int(cita_data.get('total_citas_historicas', 1)),
+        'total_no_shows': safe_int(cita_data.get('total_no_shows_historicas', 0)),
+        'pct_no_show_historico': safe_float(cita_data.get('pct_no_show_historico', 0.0)),
+        'dias_desde_ultima_cita': safe_int(cita_data.get('dias_desde_ultima_cita', 0))
     }
     
     return features
@@ -86,50 +119,55 @@ def get_risk_factors(features, probability):
     """Identificar principales factores de riesgo"""
     factors = []
     
-    if features['pct_no_show_historico'] > 0.4:
+    pct_historico = safe_float(features['pct_no_show_historico'])
+    total_no_shows = safe_int(features['total_no_shows'])
+    edad = safe_int(features['edad'])
+    hour = safe_int(features['hour'])
+    
+    if pct_historico > 0.4:
         factors.append({
             'factor': 'Historial alto de inasistencias',
             'impact': 'Alto',
-            'value': f"{features['pct_no_show_historico']*100:.0f}%"
+            'value': f"{pct_historico*100:.0f}%"
         })
-    elif features['pct_no_show_historico'] > 0.2:
+    elif pct_historico > 0.2:
         factors.append({
             'factor': 'Historial moderado de inasistencias', 
             'impact': 'Medio',
-            'value': f"{features['pct_no_show_historico']*100:.0f}%"
+            'value': f"{pct_historico*100:.0f}%"
         })
     
-    if features['total_no_shows'] > 2:
+    if total_no_shows > 2:
         factors.append({
             'factor': 'Múltiples inasistencias previas',
             'impact': 'Alto', 
-            'value': f"{features['total_no_shows']} faltas"
+            'value': f"{total_no_shows} faltas"
         })
     
-    if features['edad'] < 25:
+    if edad < 25:
         factors.append({
             'factor': 'Paciente joven',
             'impact': 'Medio',
-            'value': f"{features['edad']} años"
+            'value': f"{edad} años"
         })
-    elif features['edad'] > 65:
+    elif edad > 65:
         factors.append({
             'factor': 'Paciente adulto mayor',
             'impact': 'Medio', 
-            'value': f"{features['edad']} años"
+            'value': f"{edad} años"
         })
     
-    if features['hour'] < 9:
+    if hour < 9:
         factors.append({
             'factor': 'Cita muy temprano',
             'impact': 'Medio',
-            'value': f"{features['hour']}:00"
+            'value': f"{hour}:00"
         })
-    elif features['hour'] > 17:
+    elif hour > 17:
         factors.append({
             'factor': 'Cita muy tarde',
             'impact': 'Medio',
-            'value': f"{features['hour']}:00"
+            'value': f"{hour}:00"
         })
     
     return factors[:4]
@@ -146,6 +184,9 @@ def predict_no_show(cita_data):
         # Extraer features
         features = extract_features(cita_data)
         
+        # Debug: imprimir features para verificar tipos
+        print(f"Features extraídas: {features}", file=sys.stderr)
+        
         # Orden correcto de features según el modelo
         feature_order = [
             'edad', 'genero', 'alergias_flag', 'registro_completo', 'verificado',
@@ -154,8 +195,18 @@ def predict_no_show(cita_data):
             'total_citas', 'total_no_shows', 'pct_no_show_historico', 'dias_desde_ultima_cita'
         ]
         
-        # Convertir a array
-        X = np.array([features[f] for f in feature_order]).reshape(1, -1)
+        # Convertir a array asegurando que todos son números
+        feature_values = []
+        for f in feature_order:
+            value = features.get(f, 0)
+            # Asegurar que el valor es numérico
+            if isinstance(value, str):
+                value = safe_float(value) if '.' in str(value) else safe_int(value)
+            feature_values.append(value)
+        
+        X = np.array(feature_values).reshape(1, -1)
+        
+        print(f"Array para predicción: {X}", file=sys.stderr)
         
         # Realizar predicción
         probability = float(model.predict_proba(X)[0, 1])
@@ -183,6 +234,8 @@ def predict_no_show(cita_data):
         }
         
     except Exception as e:
+        print(f"Error detallado en predicción: {str(e)}", file=sys.stderr)
+        print(f"Tipo de error: {type(e)}", file=sys.stderr)
         return {
             'error': f'Error en predicción: {str(e)}'
         }
@@ -191,7 +244,9 @@ if __name__ == "__main__":
     # Leer datos JSON desde stdin
     try:
         input_data = json.loads(sys.stdin.read())
+        print(f"Datos recibidos: {input_data}", file=sys.stderr)
         result = predict_no_show(input_data)
         print(json.dumps(result))
     except Exception as e:
+        print(f"Error principal: {str(e)}", file=sys.stderr)
         print(json.dumps({'error': str(e)}))
