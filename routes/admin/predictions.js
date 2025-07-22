@@ -354,7 +354,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       });
     }
 
-    // Query corregido con nombres correctos de columnas según el esquema
+    // Query corregido con nombres correctos según el esquema real
     const query = `
       SELECT 
         c.*,
@@ -366,11 +366,6 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
         p.email as correo,
         p.telefono,
         p.alergias,
-        p.condiciones_medicas,
-        
-        -- Datos del historial médico si existe
-        hm.enfermedades_previas,
-        hm.tratamientos_recientes,
         
         -- Calcular estadísticas históricas del paciente
         (SELECT COUNT(*) FROM citas WHERE paciente_id = c.paciente_id AND fecha_consulta < NOW()) as total_citas_historicas,
@@ -382,17 +377,11 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
         (SELECT COALESCE(
           DATEDIFF(NOW(), MAX(CASE WHEN estado = 'Completada' THEN fecha_consulta END)),
           0
-        ) FROM citas WHERE paciente_id = c.paciente_id AND fecha_consulta < NOW()) as dias_desde_ultima_cita,
-        
-        -- Información adicional del servicio
-        s.title as servicio_nombre_completo,
-        s.description as servicio_descripcion
+        ) FROM citas WHERE paciente_id = c.paciente_id AND fecha_consulta < NOW()) as dias_desde_ultima_cita
         
       FROM citas c
       LEFT JOIN pacientes p ON c.paciente_id = p.id
-      LEFT JOIN historial_medico hm ON p.id = hm.paciente_id
-      LEFT JOIN servicios s ON c.servicio_id = s.id
-      WHERE c.consulta_id = ?
+      WHERE c.id = ?
     `;
 
     db.query(query, [citaId], (err, results) => {
@@ -418,7 +407,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
         success: true,
         detalles: {
           // Información básica de la cita
-          cita_id: citaDetalles.consulta_id,
+          cita_id: citaDetalles.id, // Cambiado de consulta_id a id
           fecha_consulta: citaDetalles.fecha_consulta,
           fecha_solicitud: citaDetalles.fecha_solicitud,
           estado: citaDetalles.estado,
@@ -448,8 +437,6 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
 
           // Información del servicio
           servicio_nombre: citaDetalles.servicio_nombre,
-          servicio_nombre_completo: citaDetalles.servicio_nombre_completo,
-          servicio_descripcion: citaDetalles.servicio_descripcion,
           categoria_servicio: citaDetalles.categoria_servicio,
           precio_servicio: citaDetalles.precio_servicio,
           duracion: citaDetalles.duracion || 30,
@@ -474,10 +461,6 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           numero_cita_tratamiento: citaDetalles.numero_cita_tratamiento,
           pre_registro_id: citaDetalles.pre_registro_id,
           archivado: citaDetalles.archivado,
-
-          // Historial médico
-          enfermedades_previas: citaDetalles.enfermedades_previas,
-          tratamientos_recientes: citaDetalles.tratamientos_recientes,
 
           // Variables calculadas para el modelo
           variables_analizadas: 18,
