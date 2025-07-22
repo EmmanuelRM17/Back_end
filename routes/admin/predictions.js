@@ -326,7 +326,6 @@ router.get("/model-info", (req, res) => {
 
 /**
  * Obtener detalles completos de una cita para análisis de predicción
- * GET /api/ml/cita-detalles/:citaId
  */
 router.get("/cita-detalles/:citaId", async (req, res) => {
   try {
@@ -341,34 +340,94 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       });
     }
 
-    // Query corregido con nombres exactos según el esquema de la imagen
+    // Query corregido - maneja pacientes registrados y no registrados
     const query = `
       SELECT 
         c.*,
-        p.nombre,
-        p.aPaterno as apellido_paterno,     
-        p.aMaterno as apellido_materno,      
-        p.genero,
-        p.fechaNacimiento as fecha_nacimiento,
-        p.correo,                           
-        p.telefono,
+        -- Si paciente_id no es null, usar datos de tabla pacientes, sino usar datos de citas
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN p.nombre 
+          ELSE c.nombre 
+        END as nombre_paciente,
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN p.aPaterno 
+          ELSE c.apellido_paterno 
+        END as apellido_paterno,
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN p.aMaterno 
+          ELSE c.apellido_materno 
+        END as apellido_materno,
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN p.genero 
+          ELSE c.genero 
+        END as genero_paciente,
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN p.fechaNacimiento 
+          ELSE NULL 
+        END as fecha_nacimiento,
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN p.correo 
+          ELSE c.correo 
+        END as correo_paciente,
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN p.telefono 
+          ELSE c.telefono 
+        END as telefono_paciente,
         p.alergias,
         p.condiciones_medicas,
+        s.title as servicio_nombre,
         
-        -- Calcular estadísticas históricas del paciente
-        (SELECT COUNT(*) FROM citas WHERE paciente_id = c.paciente_id AND fecha_consulta < NOW()) as total_citas_historicas,
-        (SELECT COUNT(*) FROM citas WHERE paciente_id = c.paciente_id AND estado IN ('Cancelada', 'No llegó') AND fecha_consulta < NOW()) as total_no_shows_historicas,
-        (SELECT COALESCE(
-          COUNT(CASE WHEN estado IN ('Cancelada', 'No llegó') THEN 1 END) / NULLIF(COUNT(*), 0), 
-          0
-        ) FROM citas WHERE paciente_id = c.paciente_id AND fecha_consulta < NOW()) as pct_no_show_historico,
-        (SELECT COALESCE(
-          DATEDIFF(NOW(), MAX(CASE WHEN estado = 'Completada' THEN fecha_consulta END)),
-          0
-        ) FROM citas WHERE paciente_id = c.paciente_id AND fecha_consulta < NOW()) as dias_desde_ultima_cita
+        -- Estadísticas históricas solo para pacientes registrados
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN (
+            SELECT COUNT(*) FROM citas 
+            WHERE paciente_id = c.paciente_id 
+            AND fecha_consulta < NOW() 
+            AND archivado = 0
+          )
+          ELSE 0 
+        END as total_citas_historicas,
+        
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN (
+            SELECT COUNT(*) FROM citas 
+            WHERE paciente_id = c.paciente_id 
+            AND estado IN ('Cancelada', 'No llegó') 
+            AND fecha_consulta < NOW() 
+            AND archivado = 0
+          )
+          ELSE 0 
+        END as total_no_shows_historicas,
+        
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN (
+            SELECT COALESCE(
+              COUNT(CASE WHEN estado IN ('Cancelada', 'No llegó') THEN 1 END) / NULLIF(COUNT(*), 0), 
+              0
+            ) FROM citas 
+            WHERE paciente_id = c.paciente_id 
+            AND fecha_consulta < NOW() 
+            AND archivado = 0
+          )
+          ELSE 0.0 
+        END as pct_no_show_historico,
+        
+        CASE 
+          WHEN c.paciente_id IS NOT NULL THEN (
+            SELECT COALESCE(
+              DATEDIFF(NOW(), MAX(CASE WHEN estado = 'Completada' THEN fecha_consulta END)),
+              0
+            ) FROM citas 
+            WHERE paciente_id = c.paciente_id 
+            AND fecha_consulta < NOW() 
+            AND archivado = 0
+          )
+          ELSE 0 
+        END as dias_desde_ultima_cita
         
       FROM citas c
       LEFT JOIN pacientes p ON c.paciente_id = p.id
+      LEFT JOIN servicios s ON c.servicio_id = s.id
       WHERE c.id = ?
     `;
 
@@ -390,36 +449,38 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
 
       const citaDetalles = results[0];
 
-      // Procesar y limpiar los datos
+      // Procesar datos según si es paciente registrado o no
+      const esRegistrado = citaDetalles.paciente_id !== null;
+      
       const response = {
         success: true,
         detalles: {
           // Información básica de la cita
-          cita_id: citaDetalles.id, // Cambiado de consulta_id a id
+          cita_id: citaDetalles.id,
           fecha_consulta: citaDetalles.fecha_consulta,
           fecha_solicitud: citaDetalles.fecha_solicitud,
           estado: citaDetalles.estado,
           notas: citaDetalles.notas,
 
-          // Información del paciente
+          // Información del paciente (registrado o no registrado)
           paciente_id: citaDetalles.paciente_id,
-          nombre: citaDetalles.nombre,
+          es_paciente_registrado: esRegistrado,
+          nombre: citaDetalles.nombre_paciente,
           apellido_paterno: citaDetalles.apellido_paterno,
           apellido_materno: citaDetalles.apellido_materno,
-          nombre_completo: `${citaDetalles.nombre || ""} ${
+          nombre_completo: `${citaDetalles.nombre_paciente || ""} ${
             citaDetalles.apellido_paterno || ""
           } ${citaDetalles.apellido_materno || ""}`.trim(),
-          genero: citaDetalles.genero,
+          genero: citaDetalles.genero_paciente,
           fecha_nacimiento: citaDetalles.fecha_nacimiento,
           edad: citaDetalles.fecha_nacimiento
             ? Math.floor(
-                (Date.now() -
-                  new Date(citaDetalles.fecha_nacimiento).getTime()) /
+                (Date.now() - new Date(citaDetalles.fecha_nacimiento).getTime()) /
                   (365.25 * 24 * 60 * 60 * 1000)
               )
             : null,
-          correo: citaDetalles.correo,
-          telefono: citaDetalles.telefono,
+          correo: citaDetalles.correo_paciente,
+          telefono: citaDetalles.telefono_paciente,
           alergias: citaDetalles.alergias,
           condiciones_medicas: citaDetalles.condiciones_medicas,
 
@@ -432,38 +493,25 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           // Información del odontólogo
           odontologo_nombre: citaDetalles.odontologo_nombre,
 
-          // Estadísticas históricas
+          // Estadísticas históricas (solo para registrados)
           total_citas_historicas: citaDetalles.total_citas_historicas || 0,
-          total_no_shows_historicas:
-            citaDetalles.total_no_shows_historicas || 0,
-          pct_no_show_historico:
-            parseFloat(citaDetalles.pct_no_show_historico) || 0.0,
+          total_no_shows_historicas: citaDetalles.total_no_shows_historicas || 0,
+          pct_no_show_historico: parseFloat(citaDetalles.pct_no_show_historico) || 0.0,
           dias_desde_ultima_cita: citaDetalles.dias_desde_ultima_cita || 0,
 
           // Información de pago
           estado_pago: citaDetalles.estado_pago,
           metodo_pago: citaDetalles.metodo_pago,
 
-          // Información adicional
-          tratamiento_id: citaDetalles.tratamiento_id,
-          numero_cita_tratamiento: citaDetalles.numero_cita_tratamiento,
-          pre_registro_id: citaDetalles.pre_registro_id,
-          archivado: citaDetalles.archivado,
-
           // Variables calculadas para el modelo
-          variables_analizadas: 18,
-          lead_time_days: citaDetalles.fecha_consulta
+          lead_time_days: citaDetalles.fecha_consulta && citaDetalles.fecha_solicitud
             ? Math.floor(
-                (new Date(citaDetalles.fecha_consulta) -
-                  new Date(citaDetalles.fecha_solicitud)) /
+                (new Date(citaDetalles.fecha_consulta) - new Date(citaDetalles.fecha_solicitud)) /
                   (1000 * 60 * 60 * 24)
               )
             : 0,
           dia_semana: citaDetalles.fecha_consulta
-            ? new Date(citaDetalles.fecha_consulta).toLocaleDateString(
-                "es-ES",
-                { weekday: "long" }
-              )
+            ? new Date(citaDetalles.fecha_consulta).toLocaleDateString("es-ES", { weekday: "long" })
             : null,
           hora_cita: citaDetalles.fecha_consulta
             ? new Date(citaDetalles.fecha_consulta).getHours()
@@ -472,90 +520,41 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
             ? [0, 6].includes(new Date(citaDetalles.fecha_consulta).getDay())
             : false,
 
-          // Factores de riesgo calculados
           factores_riesgo: [],
         },
       };
 
-      // Calcular factores de riesgo basados en los datos
+      // Calcular factores de riesgo
       const factores = [];
 
-      // Factor: Tiempo de anticipación
       if (response.detalles.lead_time_days > 30) {
         factores.push({
           factor: "Cita programada con mucha anticipación",
           valor: `${response.detalles.lead_time_days} días`,
           impacto: "Alto",
-          descripcion:
-            "Citas con más de 30 días de anticipación tienen mayor riesgo de cancelación",
         });
       }
 
-      // Factor: Historial de no-shows
-      if (response.detalles.pct_no_show_historico > 0.2) {
+      if (!esRegistrado) {
+        factores.push({
+          factor: "Paciente no registrado",
+          valor: "Sin historial",
+          impacto: "Alto",
+          descripcion: "Los pacientes no registrados tienen mayor riesgo de inasistencia",
+        });
+      } else if (response.detalles.pct_no_show_historico > 0.2) {
         factores.push({
           factor: "Historial de inasistencias",
-          valor: `${(response.detalles.pct_no_show_historico * 100).toFixed(
-            1
-          )}%`,
-          impacto:
-            response.detalles.pct_no_show_historico > 0.4 ? "Alto" : "Medio",
-          descripcion: "El paciente ha faltado a citas anteriores",
+          valor: `${(response.detalles.pct_no_show_historico * 100).toFixed(1)}%`,
+          impacto: response.detalles.pct_no_show_historico > 0.4 ? "Alto" : "Medio",
         });
       }
 
-      // Factor: Hora de la cita
-      if (
-        response.detalles.hora_cita &&
-        (response.detalles.hora_cita < 8 || response.detalles.hora_cita > 17)
-      ) {
-        factores.push({
-          factor: "Horario fuera de horas típicas",
-          valor: `${response.detalles.hora_cita}:00`,
-          impacto: "Medio",
-          descripcion: "Citas muy temprano o muy tarde tienen mayor riesgo",
-        });
-      }
-
-      // Factor: Precio alto
-      if (response.detalles.precio_servicio > 2000) {
-        factores.push({
-          factor: "Servicio de alto costo",
-          valor: `${response.detalles.precio_servicio}`,
-          impacto: "Medio",
-          descripcion: "Servicios costosos pueden generar cancelaciones",
-        });
-      }
-
-      // Factor: Paciente nuevo
-      if (response.detalles.total_citas_historicas === 0) {
-        factores.push({
-          factor: "Paciente nuevo",
-          valor: "Primera cita",
-          impacto: "Medio",
-          descripcion: "Los pacientes nuevos tienen mayor incertidumbre",
-        });
-      }
-
-      // Factor: Fin de semana
-      if (response.detalles.es_fin_semana) {
-        factores.push({
-          factor: "Cita en fin de semana",
-          valor: response.detalles.dia_semana,
-          impacto: "Bajo",
-          descripcion:
-            "Las citas de fin de semana pueden tener diferentes patrones",
-        });
-      }
-
-      // Factor: Estado de pago
       if (response.detalles.estado_pago === "Pendiente") {
         factores.push({
           factor: "Pago pendiente",
           valor: "No pagado",
           impacto: "Alto",
-          descripcion:
-            "Citas sin pago previo tienen mayor riesgo de cancelación",
         });
       }
 
@@ -563,8 +562,8 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
 
       console.log(`Detalles obtenidos para cita ${citaId}:`, {
         paciente: response.detalles.nombre_completo,
-        servicio: response.detalles.servicio_nombre,
-        factores_encontrados: factores.length,
+        registrado: esRegistrado,
+        factores: factores.length,
       });
 
       res.json(response);
