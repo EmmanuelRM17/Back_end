@@ -340,7 +340,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       });
     }
 
-    // Query corregido - maneja pacientes registrados y no registrados
+    // Query corregido con nombres exactos de campos
     const query = `
       SELECT 
         c.*,
@@ -352,11 +352,11 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
         CASE 
           WHEN c.paciente_id IS NOT NULL THEN p.aPaterno 
           ELSE c.apellido_paterno 
-        END as apellido_paterno,
+        END as apellido_paterno_final,
         CASE 
           WHEN c.paciente_id IS NOT NULL THEN p.aMaterno 
           ELSE c.apellido_materno 
-        END as apellido_materno,
+        END as apellido_materno_final,
         CASE 
           WHEN c.paciente_id IS NOT NULL THEN p.genero 
           ELSE c.genero 
@@ -366,16 +366,15 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           ELSE NULL 
         END as fecha_nacimiento,
         CASE 
-          WHEN c.paciente_id IS NOT NULL THEN p.correo 
+          WHEN c.paciente_id IS NOT NULL THEN p.email 
           ELSE c.correo 
-        END as correo_paciente,
+        END as email_paciente,
         CASE 
           WHEN c.paciente_id IS NOT NULL THEN p.telefono 
           ELSE c.telefono 
         END as telefono_paciente,
         p.alergias,
         p.condiciones_medicas,
-        s.title as servicio_nombre,
         
         -- Estadísticas históricas solo para pacientes registrados
         CASE 
@@ -427,7 +426,6 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
         
       FROM citas c
       LEFT JOIN pacientes p ON c.paciente_id = p.id
-      LEFT JOIN servicios s ON c.servicio_id = s.id
       WHERE c.id = ?
     `;
 
@@ -448,8 +446,6 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       }
 
       const citaDetalles = results[0];
-
-      // Procesar datos según si es paciente registrado o no
       const esRegistrado = citaDetalles.paciente_id !== null;
       
       const response = {
@@ -462,15 +458,15 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           estado: citaDetalles.estado,
           notas: citaDetalles.notas,
 
-          // Información del paciente (registrado o no registrado)
+          // Información del paciente
           paciente_id: citaDetalles.paciente_id,
           es_paciente_registrado: esRegistrado,
           nombre: citaDetalles.nombre_paciente,
-          apellido_paterno: citaDetalles.apellido_paterno,
-          apellido_materno: citaDetalles.apellido_materno,
+          apellido_paterno: citaDetalles.apellido_paterno_final,
+          apellido_materno: citaDetalles.apellido_materno_final,
           nombre_completo: `${citaDetalles.nombre_paciente || ""} ${
-            citaDetalles.apellido_paterno || ""
-          } ${citaDetalles.apellido_materno || ""}`.trim(),
+            citaDetalles.apellido_paterno_final || ""
+          } ${citaDetalles.apellido_materno_final || ""}`.trim(),
           genero: citaDetalles.genero_paciente,
           fecha_nacimiento: citaDetalles.fecha_nacimiento,
           edad: citaDetalles.fecha_nacimiento
@@ -479,7 +475,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
                   (365.25 * 24 * 60 * 60 * 1000)
               )
             : null,
-          correo: citaDetalles.correo_paciente,
+          correo: citaDetalles.email_paciente,
           telefono: citaDetalles.telefono_paciente,
           alergias: citaDetalles.alergias,
           condiciones_medicas: citaDetalles.condiciones_medicas,
@@ -493,7 +489,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           // Información del odontólogo
           odontologo_nombre: citaDetalles.odontologo_nombre,
 
-          // Estadísticas históricas (solo para registrados)
+          // Estadísticas históricas
           total_citas_historicas: citaDetalles.total_citas_historicas || 0,
           total_no_shows_historicas: citaDetalles.total_no_shows_historicas || 0,
           pct_no_show_historico: parseFloat(citaDetalles.pct_no_show_historico) || 0.0,
@@ -576,7 +572,6 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
     });
   }
 });
-
 /**
  * Endpoint de prueba/salud
  * GET /api/ml/health
