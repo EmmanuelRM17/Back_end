@@ -691,18 +691,18 @@ router.post("/send-reminder", async (req, res) => {
     }
 
     // Obtener información adicional de la cita para el email
-    const citaQuery = `
-      SELECT 
-        c.*,
-        p.nombre,
-        p.apellido_paterno,
-        p.apellido_materno,
-        s.title as servicio_nombre
-      FROM citas c
-      LEFT JOIN pacientes p ON c.paciente_id = p.id
-      LEFT JOIN servicios s ON c.servicio_id = s.id
-      WHERE c.consulta_id = ?
-    `;
+   const citaQuery = `
+  SELECT 
+    c.*,
+    p.nombre,
+    p.aPaterno as apellido_paterno,    
+    p.aMaterno as apellido_materno,     
+    s.title as servicio_nombre
+  FROM citas c
+  LEFT JOIN pacientes p ON c.paciente_id = p.id
+  LEFT JOIN servicios s ON c.servicio_id = s.id
+  WHERE c.id = ?                      
+`;
 
     db.query(citaQuery, [cita_id], async (err, results) => {
       if (err) {
