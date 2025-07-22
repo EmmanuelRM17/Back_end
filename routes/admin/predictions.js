@@ -324,18 +324,6 @@ router.get("/model-info", (req, res) => {
   });
 });
 
-/**
- * Endpoint de prueba/salud
- * GET /api/ml/health
- */
-router.get("/health", (req, res) => {
-  res.json({
-    success: true,
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    message: "ML Predictions service is running",
-  });
-});
 
 /**
  * Obtener detalles completos de una cita para análisis de predicción
@@ -589,6 +577,19 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       error: `Error interno del servidor: ${error.message}`,
     });
   }
+});
+
+/**
+ * Endpoint de prueba/salud
+ * GET /api/ml/health
+ */
+router.get("/health", (req, res) => {
+  res.json({
+    success: true,
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    message: "ML Predictions service is running",
+  });
 });
 
 /**

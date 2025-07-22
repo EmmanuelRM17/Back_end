@@ -206,12 +206,14 @@ def predict_no_show(cita_data):
         probability = float(model.predict_proba(X)[0, 1])
         prediction = bool(probability > 0.5)
         
-        if probability < 0.3:
+        if probability < 0.25:          # < 25%
             risk_level = 'bajo'
-        elif probability < 0.7:
+        elif probability < 0.45:        # 25% - 45%  
             risk_level = 'medio'
-        else:
+        elif probability < 0.75:        # 45% - 75%
             risk_level = 'alto'
+        else:                          # > 75%
+            risk_level = 'muy_alto'
         
         risk_factors = get_risk_factors(features, probability)
         
