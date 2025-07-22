@@ -10,7 +10,9 @@ MODEL_PATH = os.path.join(os.path.dirname(__file__), 'modelo_noshow_predictor.pk
 
 try:
     model = joblib.load(MODEL_PATH)
-    print("Modelo cargado exitosamente", file=sys.stderr)
+    # Solo mostrar en desarrollo
+    if os.getenv('NODE_ENV') == 'development':
+        print("Modelo cargado exitosamente", file=sys.stderr)
 except Exception as e:
     print(f"Error cargando modelo: {e}", file=sys.stderr)
     model = None
@@ -70,7 +72,7 @@ def get_category_code(category):
         'Urgencia': 2,
         'Protesis': 1,
         'Prótesis': 1,
-        'Restauración': 0  # Agregado para el caso actual
+        'Restauración': 0
     }
     return categories.get(str(category).strip(), 0)
 
@@ -175,9 +177,11 @@ def predict_no_show(cita_data):
     
     try:
         features = extract_features(cita_data)
-        print(f"Features extraídas: {features}", file=sys.stderr)
         
-        # Crear DataFrame con nombres de columnas exactos
+        # Solo mostrar en desarrollo
+        if os.getenv('NODE_ENV') == 'development':
+            print(f"Features extraídas: {features}", file=sys.stderr)
+        
         feature_order = [
             'edad', 'genero', 'alergias_flag', 'registro_completo', 'verificado',
             'lead_time_days', 'dow', 'hour', 'is_weekend', 'categoria_servicio',
@@ -192,9 +196,12 @@ def predict_no_show(cita_data):
                 value = safe_float(value) if '.' in str(value) else safe_int(value)
             feature_values.append(value)
         
-        # Usar DataFrame en lugar de array numpy
+        # Crear DataFrame
         X = pd.DataFrame([feature_values], columns=feature_order)
-        print(f"DataFrame para predicción: {X}", file=sys.stderr)
+        
+        # Solo mostrar información básica en desarrollo
+        if os.getenv('NODE_ENV') == 'development':
+            print(f"DataFrame shape: {X.shape}, columns: {len(X.columns)}", file=sys.stderr)
         
         probability = float(model.predict_proba(X)[0, 1])
         prediction = bool(probability > 0.5)
@@ -219,13 +226,17 @@ def predict_no_show(cita_data):
         }
         
     except Exception as e:
-        print(f"Error detallado en predicción: {str(e)}", file=sys.stderr)
+        print(f"Error en predicción: {str(e)}", file=sys.stderr)
         return {'error': f'Error en predicción: {str(e)}'}
 
 if __name__ == "__main__":
     try:
         input_data = json.loads(sys.stdin.read())
-        print(f"Datos recibidos: {input_data}", file=sys.stderr)
+        
+        # Solo mostrar en desarrollo
+        if os.getenv('NODE_ENV') == 'development':
+            print(f"Datos recibidos para paciente: {input_data.get('paciente_id', 'N/A')}", file=sys.stderr)
+        
         result = predict_no_show(input_data)
         print(json.dumps(result))
     except Exception as e:
