@@ -386,16 +386,12 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
         
         -- Información adicional del servicio
         s.title as servicio_nombre_completo,
-        s.description as servicio_descripcion,
-        
-        -- Información del odontólogo
-        o.nombre as odontologo_nombre_completo
+        s.description as servicio_descripcion
         
       FROM citas c
       LEFT JOIN pacientes p ON c.paciente_id = p.id
       LEFT JOIN historial_medico hm ON p.id = hm.paciente_id
       LEFT JOIN servicios s ON c.servicio_id = s.id
-      LEFT JOIN odontologos o ON c.odontologo_id = o.id
       WHERE c.consulta_id = ?
     `;
 
@@ -460,7 +456,6 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
 
           // Información del odontólogo
           odontologo_nombre: citaDetalles.odontologo_nombre,
-          odontologo_nombre_completo: citaDetalles.odontologo_nombre_completo,
 
           // Estadísticas históricas
           total_citas_historicas: citaDetalles.total_citas_historicas || 0,
@@ -718,12 +713,10 @@ router.post("/send-reminder", async (req, res) => {
         p.nombre,
         p.apellido_paterno,
         p.apellido_materno,
-        s.title as servicio_nombre,
-        o.nombre as odontologo_nombre
+        s.title as servicio_nombre
       FROM citas c
       LEFT JOIN pacientes p ON c.paciente_id = p.id
       LEFT JOIN servicios s ON c.servicio_id = s.id
-      LEFT JOIN odontologos o ON c.odontologo_id = o.id
       WHERE c.consulta_id = ?
     `;
 
@@ -801,16 +794,6 @@ router.post("/send-reminder", async (req, res) => {
                                 citaInfo.servicio_nombre || "Consulta General"
                               }</td>
                           </tr>
-                          ${
-                            citaInfo.odontologo_nombre
-                              ? `
-                          <tr>
-                              <td style="padding: 8px 0; font-weight: 500; color: #555;">Doctor:</td>
-                              <td style="padding: 8px 0; color: #333;">Dr. ${citaInfo.odontologo_nombre}</td>
-                          </tr>
-                          `
-                              : ""
-                          }
                       </table>
                   </div>
 
@@ -906,4 +889,5 @@ router.post("/send-reminder", async (req, res) => {
     });
   }
 });
+
 module.exports = router;
