@@ -354,16 +354,16 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       });
     }
 
-    // Query para obtener todos los detalles de la cita y paciente
+    // Query corregido con nombres correctos de columnas según el esquema
     const query = `
       SELECT 
         c.*,
         p.nombre,
-        p.apellido_paterno,
-        p.apellido_materno,
+        p.aPaterno as apellido_paterno,
+        p.aMaterno as apellido_materno,
         p.genero,
-        p.fecha_nacimiento,
-        p.correo,
+        p.fechaNacimiento as fecha_nacimiento,
+        p.email as correo,
         p.telefono,
         p.alergias,
         p.condiciones_medicas,
