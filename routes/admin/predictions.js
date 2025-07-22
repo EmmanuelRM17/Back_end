@@ -324,7 +324,6 @@ router.get("/model-info", (req, res) => {
   });
 });
 
-
 /**
  * Obtener detalles completos de una cita para análisis de predicción
  * GET /api/ml/cita-detalles/:citaId
@@ -347,11 +346,11 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       SELECT 
         c.*,
         p.nombre,
-        p.aPaterno as apellido_paterno,
-        p.aMaterno as apellido_materno,
+        p.aPaterno as apellido_paterno,     
+        p.aMaterno as apellido_materno,      
         p.genero,
         p.fechaNacimiento as fecha_nacimiento,
-        p.email as correo,
+        p.correo,                           
         p.telefono,
         p.alergias,
         p.condiciones_medicas,
@@ -407,7 +406,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           nombre: citaDetalles.nombre,
           apellido_paterno: citaDetalles.apellido_paterno,
           apellido_materno: citaDetalles.apellido_materno,
-          nombre_completo: `${citaDetalles.nombre || ''} ${
+          nombre_completo: `${citaDetalles.nombre || ""} ${
             citaDetalles.apellido_paterno || ""
           } ${citaDetalles.apellido_materno || ""}`.trim(),
           genero: citaDetalles.genero,
