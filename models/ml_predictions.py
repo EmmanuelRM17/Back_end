@@ -1,13 +1,11 @@
-# Archivo: models/ml_predictions.py
-
 import joblib
 import json
 import sys
 import numpy as np
+import pandas as pd
 from datetime import datetime
 import os
 
-# Cargar el modelo al importar
 MODEL_PATH = os.path.join(os.path.dirname(__file__), 'modelo_noshow_predictor.pkl')
 
 try:
@@ -17,7 +15,6 @@ except Exception as e:
     print(f"Error cargando modelo: {e}", file=sys.stderr)
     model = None
 
-# Función para convertir valores a números de forma segura
 def safe_float(value, default=0.0):
     """Convierte un valor a float de forma segura"""
     if value is None:
@@ -71,14 +68,14 @@ def get_category_code(category):
         'General': 0, 
         'Especialidad': 1, 
         'Urgencia': 2,
-        'Protesis': 1,  # Mapear Prótesis como Especialidad
-        'Prótesis': 1   # Con acento también
+        'Protesis': 1,
+        'Prótesis': 1,
+        'Restauración': 0  # Agregado para el caso actual
     }
     return categories.get(str(category).strip(), 0)
 
 def extract_features(cita_data):
     """Extraer features del modelo a partir de datos de cita"""
-    
     fecha_consulta_str = cita_data.get('fecha_consulta', '')
     try:
         fecha_consulta = datetime.fromisoformat(fecha_consulta_str.replace('Z', ''))
@@ -91,7 +88,6 @@ def extract_features(cita_data):
         cita_data.get('fecha_consulta')
     )
     
-    # Convertir todos los valores numéricos de forma segura
     features = {
         'edad': edad,
         'genero': 1 if str(cita_data.get('paciente_genero', '')).strip() == 'Masculino' else 0,
@@ -99,7 +95,7 @@ def extract_features(cita_data):
         'registro_completo': safe_int(cita_data.get('paciente_registro_completo', True), 1),
         'verificado': safe_int(cita_data.get('paciente_verificado', True), 1),
         'lead_time_days': lead_time_days,
-        'dow': fecha_consulta.weekday() + 1,  # 1=Lunes, 7=Domingo
+        'dow': fecha_consulta.weekday() + 1,
         'hour': fecha_consulta.hour,
         'is_weekend': 1 if fecha_consulta.weekday() >= 5 else 0,
         'categoria_servicio': get_category_code(cita_data.get('categoria_servicio', 'General')),
@@ -174,20 +170,14 @@ def get_risk_factors(features, probability):
 
 def predict_no_show(cita_data):
     """Realizar predicción de no-show"""
-    
     if not model:
-        return {
-            'error': 'Modelo no disponible'
-        }
+        return {'error': 'Modelo no disponible'}
     
     try:
-        # Extraer features
         features = extract_features(cita_data)
-        
-        # Debug: imprimir features para verificar tipos
         print(f"Features extraídas: {features}", file=sys.stderr)
         
-        # Orden correcto de features según el modelo
+        # Crear DataFrame con nombres de columnas exactos
         feature_order = [
             'edad', 'genero', 'alergias_flag', 'registro_completo', 'verificado',
             'lead_time_days', 'dow', 'hour', 'is_weekend', 'categoria_servicio',
@@ -195,24 +185,20 @@ def predict_no_show(cita_data):
             'total_citas', 'total_no_shows', 'pct_no_show_historico', 'dias_desde_ultima_cita'
         ]
         
-        # Convertir a array asegurando que todos son números
         feature_values = []
         for f in feature_order:
             value = features.get(f, 0)
-            # Asegurar que el valor es numérico
             if isinstance(value, str):
                 value = safe_float(value) if '.' in str(value) else safe_int(value)
             feature_values.append(value)
         
-        X = np.array(feature_values).reshape(1, -1)
+        # Usar DataFrame en lugar de array numpy
+        X = pd.DataFrame([feature_values], columns=feature_order)
+        print(f"DataFrame para predicción: {X}", file=sys.stderr)
         
-        print(f"Array para predicción: {X}", file=sys.stderr)
-        
-        # Realizar predicción
         probability = float(model.predict_proba(X)[0, 1])
         prediction = bool(probability > 0.5)
         
-        # Determinar nivel de riesgo
         if probability < 0.3:
             risk_level = 'bajo'
         elif probability < 0.7:
@@ -220,7 +206,6 @@ def predict_no_show(cita_data):
         else:
             risk_level = 'alto'
         
-        # Obtener factores de riesgo
         risk_factors = get_risk_factors(features, probability)
         
         return {
@@ -235,13 +220,9 @@ def predict_no_show(cita_data):
         
     except Exception as e:
         print(f"Error detallado en predicción: {str(e)}", file=sys.stderr)
-        print(f"Tipo de error: {type(e)}", file=sys.stderr)
-        return {
-            'error': f'Error en predicción: {str(e)}'
-        }
+        return {'error': f'Error en predicción: {str(e)}'}
 
 if __name__ == "__main__":
-    # Leer datos JSON desde stdin
     try:
         input_data = json.loads(sys.stdin.read())
         print(f"Datos recibidos: {input_data}", file=sys.stderr)
