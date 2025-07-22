@@ -354,7 +354,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       });
     }
 
-    // Query corregido con nombres correctos según el esquema real
+    // Query corregido con nombres exactos según el esquema de la imagen
     const query = `
       SELECT 
         c.*,
@@ -366,6 +366,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
         p.email as correo,
         p.telefono,
         p.alergias,
+        p.condiciones_medicas,
         
         -- Calcular estadísticas históricas del paciente
         (SELECT COUNT(*) FROM citas WHERE paciente_id = c.paciente_id AND fecha_consulta < NOW()) as total_citas_historicas,
@@ -418,7 +419,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           nombre: citaDetalles.nombre,
           apellido_paterno: citaDetalles.apellido_paterno,
           apellido_materno: citaDetalles.apellido_materno,
-          nombre_completo: `${citaDetalles.nombre} ${
+          nombre_completo: `${citaDetalles.nombre || ''} ${
             citaDetalles.apellido_paterno || ""
           } ${citaDetalles.apellido_materno || ""}`.trim(),
           genero: citaDetalles.genero,
