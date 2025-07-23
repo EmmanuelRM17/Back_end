@@ -447,7 +447,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
 
       const citaDetalles = results[0];
       const esRegistrado = citaDetalles.paciente_id !== null;
-      
+
       const response = {
         success: true,
         detalles: {
@@ -471,7 +471,8 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           fecha_nacimiento: citaDetalles.fecha_nacimiento,
           edad: citaDetalles.fecha_nacimiento
             ? Math.floor(
-                (Date.now() - new Date(citaDetalles.fecha_nacimiento).getTime()) /
+                (Date.now() -
+                  new Date(citaDetalles.fecha_nacimiento).getTime()) /
                   (365.25 * 24 * 60 * 60 * 1000)
               )
             : null,
@@ -491,8 +492,10 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
 
           // Estadísticas históricas
           total_citas_historicas: citaDetalles.total_citas_historicas || 0,
-          total_no_shows_historicas: citaDetalles.total_no_shows_historicas || 0,
-          pct_no_show_historico: parseFloat(citaDetalles.pct_no_show_historico) || 0.0,
+          total_no_shows_historicas:
+            citaDetalles.total_no_shows_historicas || 0,
+          pct_no_show_historico:
+            parseFloat(citaDetalles.pct_no_show_historico) || 0.0,
           dias_desde_ultima_cita: citaDetalles.dias_desde_ultima_cita || 0,
 
           // Información de pago
@@ -500,14 +503,19 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           metodo_pago: citaDetalles.metodo_pago,
 
           // Variables calculadas para el modelo
-          lead_time_days: citaDetalles.fecha_consulta && citaDetalles.fecha_solicitud
-            ? Math.floor(
-                (new Date(citaDetalles.fecha_consulta) - new Date(citaDetalles.fecha_solicitud)) /
-                  (1000 * 60 * 60 * 24)
-              )
-            : 0,
+          lead_time_days:
+            citaDetalles.fecha_consulta && citaDetalles.fecha_solicitud
+              ? Math.floor(
+                  (new Date(citaDetalles.fecha_consulta) -
+                    new Date(citaDetalles.fecha_solicitud)) /
+                    (1000 * 60 * 60 * 24)
+                )
+              : 0,
           dia_semana: citaDetalles.fecha_consulta
-            ? new Date(citaDetalles.fecha_consulta).toLocaleDateString("es-ES", { weekday: "long" })
+            ? new Date(citaDetalles.fecha_consulta).toLocaleDateString(
+                "es-ES",
+                { weekday: "long" }
+              )
             : null,
           hora_cita: citaDetalles.fecha_consulta
             ? new Date(citaDetalles.fecha_consulta).getHours()
@@ -536,13 +544,17 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           factor: "Paciente no registrado",
           valor: "Sin historial",
           impacto: "Alto",
-          descripcion: "Los pacientes no registrados tienen mayor riesgo de inasistencia",
+          descripcion:
+            "Los pacientes no registrados tienen mayor riesgo de inasistencia",
         });
       } else if (response.detalles.pct_no_show_historico > 0.2) {
         factores.push({
           factor: "Historial de inasistencias",
-          valor: `${(response.detalles.pct_no_show_historico * 100).toFixed(1)}%`,
-          impacto: response.detalles.pct_no_show_historico > 0.4 ? "Alto" : "Medio",
+          valor: `${(response.detalles.pct_no_show_historico * 100).toFixed(
+            1
+          )}%`,
+          impacto:
+            response.detalles.pct_no_show_historico > 0.4 ? "Alto" : "Medio",
         });
       }
 
@@ -685,7 +697,7 @@ router.post("/send-reminder", async (req, res) => {
     }
 
     // Obtener información adicional de la cita para el email
-   const citaQuery = `
+    const citaQuery = `
   SELECT 
     c.*,
     p.nombre,
