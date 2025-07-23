@@ -483,98 +483,59 @@ router.post("/logout", (req, res) => {
   const pacienteToken = req.cookies?.carolDental_paciente;
   const empleadoToken = req.cookies?.carolDental_empleado;
 
-  // Limpiar todas las cookies
+  let userType = null;
+  let token = null;
+  let cookieName = null;
+  let tableName = null;
+
+  // Identificar el tipo activo
+  if (adminToken) {
+    userType = "administrador";
+    token = adminToken;
+    cookieName = "carolDental_admin";
+    tableName = "administradores";
+  } else if (empleadoToken) {
+    userType = "empleado";
+    token = empleadoToken;
+    cookieName = "carolDental_empleado";
+    tableName = "empleados";
+  } else if (pacienteToken) {
+    userType = "paciente";
+    token = pacienteToken;
+    cookieName = "carolDental_paciente";
+    tableName = "pacientes";
+  }
+
+  if (!token) {
+    return res.status(400).json({ message: "No hay sesión activa." });
+  }
+
+  // Limpiar SOLO la cookie específica
   const cookieOptions = {
     httpOnly: true,
     secure: process.env.NODE_ENV === "production",
     sameSite: process.env.NODE_ENV === "production" ? "None" : "Lax",
     path: "/",
     maxAge: 0,
-    domain:
-      process.env.NODE_ENV === "production" ? ".onrender.com" : "localhost",
+    domain: process.env.NODE_ENV === "production" ? ".onrender.com" : "localhost",
   };
 
-  res.cookie("carolDental_admin", "", cookieOptions);
-  res.cookie("carolDental_paciente", "", cookieOptions);
-  res.cookie("carolDental_empleado", "", cookieOptions);
+  res.cookie(cookieName, "", cookieOptions);
 
-  // Queries separados
-  const queryPacientes = `UPDATE pacientes SET cookie = NULL WHERE cookie = ?`;
-  const queryAdministradores = `UPDATE administradores SET cookie = NULL WHERE cookie = ?`;
-  const queryEmpleados = `UPDATE empleados SET cookie = NULL WHERE cookie = ?`;
-
-  let resultadosAfectados = 0;
-
-  // Primero intenta en pacientes si hay token
-  if (pacienteToken) {
-    db.query(queryPacientes, [pacienteToken], (err, resultPacientes) => {
-      if (err) {
-        console.error("Error al limpiar token en pacientes:", err);
-      } else {
-        resultadosAfectados += resultPacientes.affectedRows;
-      }
-
-      // Continuar con empleados
-      limpiarEmpleados();
-    });
-  } else {
-    // Si no hay token de paciente, continuar con empleados
-    limpiarEmpleados();
-  }
-
-  function limpiarEmpleados() {
-    if (empleadoToken) {
-      db.query(queryEmpleados, [empleadoToken], (err, resultEmpleados) => {
-        if (err) {
-          console.error("Error al limpiar token en empleados:", err);
-        } else {
-          resultadosAfectados += resultEmpleados.affectedRows;
-        }
-
-        // Continuar con administradores
-        limpiarAdministradores();
-      });
-    } else {
-      // Si no hay token de empleado, continuar con administradores
-      limpiarAdministradores();
-    }
-  }
-
-  function limpiarAdministradores() {
-    if (adminToken) {
-      db.query(queryAdministradores, [adminToken], (err, resultAdmin) => {
-        if (err) {
-          console.error("Error al limpiar token en administradores:", err);
-          return res.status(500).json({
-            message: "Error al cerrar sesión.",
-          });
-        }
-
-        resultadosAfectados += resultAdmin.affectedRows;
-
-        // Finalizar logout
-        finalizarLogout();
-      });
-    } else {
-      // Si no hay token de admin, finalizar
-      finalizarLogout();
-    }
-  }
-
-  function finalizarLogout() {
-    if (resultadosAfectados === 0) {
-      console.log("No se encontró el token en la base de datos");
-      // Aún consideramos el logout exitoso ya que las cookies fueron eliminadas
-      return res.status(200).json({
-        message: "Sesión cerrada exitosamente.",
-      });
+  // Limpiar SOLO en la tabla específica
+  const query = `UPDATE ${tableName} SET cookie = NULL WHERE cookie = ?`;
+  
+  db.query(query, [token], (err, result) => {
+    if (err) {
+      console.error(`Error al limpiar token en ${tableName}:`, err);
+      return res.status(500).json({ message: "Error al cerrar sesión." });
     }
 
-    console.log("Sesión cerrada exitosamente en la base de datos");
     return res.status(200).json({
-      message: "Sesión cerrada exitosamente.",
+      message: `Sesión de ${userType} cerrada exitosamente.`,
+      userType: userType
     });
-  }
+  });
 });
 
 module.exports = router;
