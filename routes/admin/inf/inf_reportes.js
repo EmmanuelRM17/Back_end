@@ -174,58 +174,35 @@ router.post("/update-config", async (req, res) => {
   });
 });
 
-// Obtener todos los pacientes con paginación
+// Obtener todos los pacientes
 router.get("/pacientes", async (req, res) => {
   try {
-    const { page = 1, limit = 10, search = '' } = req.query;
-    const offset = (page - 1) * limit;
-
+    const { search = '' } = req.query;
+    
     let whereClause = '';
     let queryParams = [];
-
+    
     // Agregar filtro de búsqueda si se proporciona
     if (search) {
       whereClause = `WHERE nombre LIKE ? OR aPaterno LIKE ? OR aMaterno LIKE ? OR email LIKE ?`;
       queryParams = [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`];
     }
-
+    
     const query = `
       SELECT id, nombre, aPaterno, aMaterno, email, telefono, estado, fecha_creacion
       FROM pacientes 
       ${whereClause}
       ORDER BY fecha_creacion DESC
-      LIMIT ? OFFSET ?
     `;
-
-    queryParams.push(parseInt(limit), parseInt(offset));
-
+    
     db.query(query, queryParams, (err, results) => {
       if (err) {
         return res.status(500).json({ message: "Error al obtener pacientes." });
       }
-
-      // Obtener el total de registros para la paginación
-      const countQuery = `SELECT COUNT(*) as total FROM pacientes ${whereClause}`;
-      const countParams = search ? [`%${search}%`, `%${search}%`, `%${search}%`, `%${search}%`] : [];
-
-      db.query(countQuery, countParams, (err, countResult) => {
-        if (err) {
-          return res.status(500).json({ message: "Error al contar pacientes." });
-        }
-
-        const total = countResult[0].total;
-        const totalPages = Math.ceil(total / limit);
-
-        return res.status(200).json({
-          pacientes: results,
-          pagination: {
-            currentPage: parseInt(page),
-            totalPages,
-            totalRecords: total,
-            hasNext: page < totalPages,
-            hasPrev: page > 1
-          }
-        });
+      
+      return res.status(200).json({
+        pacientes: results,
+        total: results.length
       });
     });
   } catch (error) {
