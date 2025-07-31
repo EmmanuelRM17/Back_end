@@ -8,7 +8,7 @@ const path = require("path");
 const db = require("../../db");
 
 // Configuración de nodemailer
-const transporter = nodemailer.createTransport({
+const transporter = nodemailer.createTransporter({
   host: "smtp.hostinger.com",
   port: 465,
   secure: true,
@@ -55,10 +55,8 @@ const getPacienteHistorial = (pacienteId) => {
         // Asegurar que no haya valores null
         historial.total_citas = historial.total_citas || 1;
         historial.total_no_shows = historial.total_no_shows || 0;
-        historial.pct_no_show_historico =
-          historial.pct_no_show_historico || 0.0;
-        historial.dias_desde_ultima_cita =
-          historial.dias_desde_ultima_cita || 0;
+        historial.pct_no_show_historico = historial.pct_no_show_historico || 0.0;
+        historial.dias_desde_ultima_cita = historial.dias_desde_ultima_cita || 0;
 
         console.log("Historial obtenido para paciente:", pacienteId, historial);
         resolve(historial);
@@ -77,29 +75,24 @@ const callPythonPredictor = (citaData) => {
     console.log("Ejecutando script Python:", pythonScript);
     console.log("Datos enviados al modelo:", JSON.stringify(citaData, null, 2));
 
-    // Usar python3 o python según tu sistema
     const pythonCommand = process.platform === "win32" ? "python" : "python3";
     const pythonProcess = spawn(pythonCommand, [pythonScript]);
 
     let result = "";
     let error = "";
 
-    // Enviar datos JSON al script Python
     pythonProcess.stdin.write(JSON.stringify(citaData));
     pythonProcess.stdin.end();
 
-    // Recoger resultado del stdout
     pythonProcess.stdout.on("data", (data) => {
       result += data.toString();
     });
 
-    // Recoger errores del stderr
     pythonProcess.stderr.on("data", (data) => {
       error += data.toString();
       console.error("Error Python stderr:", data.toString());
     });
 
-    // Cuando termina el proceso
     pythonProcess.on("close", (code) => {
       console.log(`Proceso Python terminó con código: ${code}`);
       console.log("Resultado Python:", result);
@@ -118,7 +111,6 @@ const callPythonPredictor = (citaData) => {
       }
     });
 
-    // Manejar timeout (30 segundos)
     const timeout = setTimeout(() => {
       console.log("Timeout en predicción ML");
       pythonProcess.kill();
@@ -149,11 +141,9 @@ router.post("/predict-no-show", async (req, res) => {
       });
     }
 
-    // Obtener historial del paciente desde la BD
     try {
       const historial = await getPacienteHistorial(citaData.paciente_id);
 
-      // Combinar datos de la cita con historial del paciente
       const citaCompleta = {
         ...citaData,
         total_citas_historicas: historial.total_citas,
@@ -164,7 +154,6 @@ router.post("/predict-no-show", async (req, res) => {
 
       console.log("Cita con historial:", JSON.stringify(citaCompleta, null, 2));
 
-      // Llamar al modelo Python
       const prediccion = await callPythonPredictor(citaCompleta);
 
       if (prediccion.error) {
@@ -175,11 +164,25 @@ router.post("/predict-no-show", async (req, res) => {
         });
       }
 
+      // Interpretar resultado binario (1 = No Show, 0 = Asistirá)
+      const willNoShow = prediccion.prediction.will_no_show === 1;
+      
       console.log("=== PREDICCIÓN EXITOSA ===");
-      console.log("Probabilidad:", prediccion.prediction.probability);
-      console.log("Nivel de riesgo:", prediccion.prediction.risk_level);
+      console.log("Predicción binaria:", prediccion.prediction.will_no_show);
+      console.log("Interpretación:", willNoShow ? "NO ASISTIRÁ" : "ASISTIRÁ");
 
-      res.json(prediccion);
+      res.json({
+        success: true,
+        prediction: {
+          will_no_show: willNoShow,
+          prediction_binary: prediccion.prediction.will_no_show,
+          risk_level: willNoShow ? "ALTO" : "BAJO",
+          mensaje: willNoShow 
+            ? "El modelo predice que este paciente probablemente NO asistirá a su cita"
+            : "El modelo predice que este paciente probablemente SÍ asistirá a su cita"
+        }
+      });
+
     } catch (historialError) {
       console.error("Error obteniendo historial del paciente:", historialError);
       return res.status(500).json({
@@ -198,7 +201,6 @@ router.post("/predict-no-show", async (req, res) => {
 
 /**
  * Endpoint para predicciones en lote (múltiples citas)
- * POST /api/ml/predict-batch
  */
 router.post("/predict-batch", async (req, res) => {
   try {
@@ -215,7 +217,6 @@ router.post("/predict-batch", async (req, res) => {
 
     const predicciones = [];
 
-    // Procesar cada cita
     for (let i = 0; i < citas.length; i++) {
       const cita = citas[i];
       console.log(`Procesando cita ${i + 1}/${citas.length}`);
@@ -242,12 +243,26 @@ router.post("/predict-batch", async (req, res) => {
 
         const prediccion = await callPythonPredictor(citaCompleta);
 
-        predicciones.push({
-          cita_id: cita.cita_id || cita.id,
-          success: !prediccion.error,
-          prediction: prediccion.prediction || null,
-          error: prediccion.error || null,
-        });
+        if (prediccion.error) {
+          predicciones.push({
+            cita_id: cita.cita_id || cita.id,
+            success: false,
+            prediction: null,
+            error: prediccion.error,
+          });
+        } else {
+          const willNoShow = prediccion.prediction.will_no_show === 1;
+          predicciones.push({
+            cita_id: cita.cita_id || cita.id,
+            success: true,
+            prediction: {
+              will_no_show: willNoShow,
+              prediction_binary: prediccion.prediction.will_no_show,
+              risk_level: willNoShow ? "ALTO" : "BAJO"
+            },
+            error: null,
+          });
+        }
       } catch (error) {
         console.error(`Error procesando cita ${i + 1}:`, error);
         predicciones.push({
@@ -259,17 +274,21 @@ router.post("/predict-batch", async (req, res) => {
       }
     }
 
-    console.log(
-      `=== BATCH COMPLETADO: ${predicciones.length} predicciones ===`
-    );
+    const successful = predicciones.filter(p => p.success);
+    const altoRiesgo = successful.filter(p => p.prediction.will_no_show).length;
+
+    console.log(`=== BATCH COMPLETADO ===`);
+    console.log(`Total: ${predicciones.length}, Exitosas: ${successful.length}, Alto riesgo: ${altoRiesgo}`);
 
     res.json({
       success: true,
       predictions: predicciones,
       summary: {
         total: predicciones.length,
-        successful: predicciones.filter((p) => p.success).length,
-        failed: predicciones.filter((p) => !p.success).length,
+        successful: successful.length,
+        failed: predicciones.filter(p => !p.success).length,
+        alto_riesgo: altoRiesgo,
+        bajo_riesgo: successful.length - altoRiesgo
       },
     });
   } catch (error) {
@@ -282,8 +301,7 @@ router.post("/predict-batch", async (req, res) => {
 });
 
 /**
- * Información del modelo y status
- * GET /api/ml/model-info
+ * Información del modelo y status - CORREGIDO
  */
 router.get("/model-info", (req, res) => {
   res.json({
@@ -292,33 +310,32 @@ router.get("/model-info", (req, res) => {
       name: "No-Show Predictor",
       type: "RandomForestClassifier",
       version: "1.0.0",
+      output_type: "binary_classification",
+      classes: [0, 1], // 0 = Asistirá, 1 = No Show
       features: [
         "edad",
-        "genero",
+        "genero", 
         "alergias_flag",
-        "registro_completo",
-        "verificado",
         "lead_time_days",
         "dow",
         "hour",
-        "is_weekend",
+        "is_weekend", 
         "categoria_servicio",
         "precio_servicio",
         "duration_min",
         "paid_flag",
         "tratamiento_pendiente",
         "total_citas",
-        "total_no_shows",
+        "total_no_shows", 
         "pct_no_show_historico",
-        "dias_desde_ultima_cita",
+        "dias_desde_ultima_cita"
       ],
       available: true,
-      description:
-        "Modelo para predecir la probabilidad de que un paciente no asista a su cita",
+      description: "Modelo de clasificación binaria para predecir si un paciente asistirá (0) o no asistirá (1) a su cita",
     },
     endpoints: {
       predict_single: "POST /api/ml/predict-no-show",
-      predict_batch: "POST /api/ml/predict-batch",
+      predict_batch: "POST /api/ml/predict-batch", 
       model_info: "GET /api/ml/model-info",
     },
   });
@@ -340,11 +357,9 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       });
     }
 
-    // Query corregido con nombres exactos de campos
     const query = `
       SELECT 
         c.*,
-        -- Si paciente_id no es null, usar datos de tabla pacientes, sino usar datos de citas
         CASE 
           WHEN c.paciente_id IS NOT NULL THEN p.nombre 
           ELSE c.nombre 
@@ -376,7 +391,6 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
         p.alergias,
         p.condiciones_medicas,
         
-        -- Estadísticas históricas solo para pacientes registrados
         CASE 
           WHEN c.paciente_id IS NOT NULL THEN (
             SELECT COUNT(*) FROM citas 
@@ -451,14 +465,12 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       const response = {
         success: true,
         detalles: {
-          // Información básica de la cita
           cita_id: citaDetalles.id,
           fecha_consulta: citaDetalles.fecha_consulta,
           fecha_solicitud: citaDetalles.fecha_solicitud,
           estado: citaDetalles.estado,
           notas: citaDetalles.notas,
 
-          // Información del paciente
           paciente_id: citaDetalles.paciente_id,
           es_paciente_registrado: esRegistrado,
           nombre: citaDetalles.nombre_paciente,
@@ -471,8 +483,7 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           fecha_nacimiento: citaDetalles.fecha_nacimiento,
           edad: citaDetalles.fecha_nacimiento
             ? Math.floor(
-                (Date.now() -
-                  new Date(citaDetalles.fecha_nacimiento).getTime()) /
+                (Date.now() - new Date(citaDetalles.fecha_nacimiento).getTime()) /
                   (365.25 * 24 * 60 * 60 * 1000)
               )
             : null,
@@ -481,28 +492,21 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           alergias: citaDetalles.alergias,
           condiciones_medicas: citaDetalles.condiciones_medicas,
 
-          // Información del servicio
           servicio_nombre: citaDetalles.servicio_nombre,
           categoria_servicio: citaDetalles.categoria_servicio,
           precio_servicio: citaDetalles.precio_servicio,
           duracion: citaDetalles.duracion || 30,
 
-          // Información del odontólogo
           odontologo_nombre: citaDetalles.odontologo_nombre,
 
-          // Estadísticas históricas
           total_citas_historicas: citaDetalles.total_citas_historicas || 0,
-          total_no_shows_historicas:
-            citaDetalles.total_no_shows_historicas || 0,
-          pct_no_show_historico:
-            parseFloat(citaDetalles.pct_no_show_historico) || 0.0,
+          total_no_shows_historicas: citaDetalles.total_no_shows_historicas || 0,
+          pct_no_show_historico: parseFloat(citaDetalles.pct_no_show_historico) || 0.0,
           dias_desde_ultima_cita: citaDetalles.dias_desde_ultima_cita || 0,
 
-          // Información de pago
           estado_pago: citaDetalles.estado_pago,
           metodo_pago: citaDetalles.metodo_pago,
 
-          // Variables calculadas para el modelo
           lead_time_days:
             citaDetalles.fecha_consulta && citaDetalles.fecha_solicitud
               ? Math.floor(
@@ -512,10 +516,9 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
                 )
               : 0,
           dia_semana: citaDetalles.fecha_consulta
-            ? new Date(citaDetalles.fecha_consulta).toLocaleDateString(
-                "es-ES",
-                { weekday: "long" }
-              )
+            ? new Date(citaDetalles.fecha_consulta).toLocaleDateString("es-ES", {
+                weekday: "long",
+              })
             : null,
           hora_cita: citaDetalles.fecha_consulta
             ? new Date(citaDetalles.fecha_consulta).getHours()
@@ -544,17 +547,13 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           factor: "Paciente no registrado",
           valor: "Sin historial",
           impacto: "Alto",
-          descripcion:
-            "Los pacientes no registrados tienen mayor riesgo de inasistencia",
+          descripcion: "Los pacientes no registrados tienen mayor riesgo de inasistencia",
         });
       } else if (response.detalles.pct_no_show_historico > 0.2) {
         factores.push({
           factor: "Historial de inasistencias",
-          valor: `${(response.detalles.pct_no_show_historico * 100).toFixed(
-            1
-          )}%`,
-          impacto:
-            response.detalles.pct_no_show_historico > 0.4 ? "Alto" : "Medio",
+          valor: `${(response.detalles.pct_no_show_historico * 100).toFixed(1)}%`,
+          impacto: response.detalles.pct_no_show_historico > 0.4 ? "Alto" : "Medio",
         });
       }
 
@@ -584,9 +583,9 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
     });
   }
 });
+
 /**
  * Endpoint de prueba/salud
- * GET /api/ml/health
  */
 router.get("/health", (req, res) => {
   res.json({
@@ -594,27 +593,23 @@ router.get("/health", (req, res) => {
     status: "healthy",
     timestamp: new Date().toISOString(),
     message: "ML Predictions service is running",
+    model_type: "binary_classification"
   });
 });
 
 /**
  * Endpoint para obtener estadísticas de predicciones
- * GET /api/ml/estadisticas-predicciones
  */
 router.get("/estadisticas-predicciones", async (req, res) => {
   try {
-    const { periodo = "mes" } = req.query; // hoy, semana, mes
+    const { periodo = "mes" } = req.query;
 
     let fechaInicio;
     const ahora = new Date();
 
     switch (periodo) {
       case "hoy":
-        fechaInicio = new Date(
-          ahora.getFullYear(),
-          ahora.getMonth(),
-          ahora.getDate()
-        );
+        fechaInicio = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
         break;
       case "semana":
         fechaInicio = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -625,7 +620,6 @@ router.get("/estadisticas-predicciones", async (req, res) => {
         break;
     }
 
-    // Query para obtener estadísticas
     const statsQuery = `
       SELECT 
         COUNT(*) as total_citas,
@@ -659,13 +653,9 @@ router.get("/estadisticas-predicciones", async (req, res) => {
           citas_canceladas: stats.citas_canceladas,
           precio_promedio: parseFloat(stats.precio_promedio) || 0,
           tasa_completacion:
-            stats.total_citas > 0
-              ? ((stats.citas_completadas / stats.total_citas) * 100).toFixed(1)
-              : 0,
+            stats.total_citas > 0 ? ((stats.citas_completadas / stats.total_citas) * 100).toFixed(1) : 0,
           tasa_cancelacion:
-            stats.total_citas > 0
-              ? ((stats.citas_canceladas / stats.total_citas) * 100).toFixed(1)
-              : 0,
+            stats.total_citas > 0 ? ((stats.citas_canceladas / stats.total_citas) * 100).toFixed(1) : 0,
         },
       });
     });
@@ -680,7 +670,6 @@ router.get("/estadisticas-predicciones", async (req, res) => {
 
 /**
  * Endpoint para enviar recordatorio de cita por email
- * POST /api/ml/send-reminder
  */
 router.post("/send-reminder", async (req, res) => {
   try {
@@ -696,19 +685,18 @@ router.post("/send-reminder", async (req, res) => {
       });
     }
 
-    // Obtener información adicional de la cita para el email
     const citaQuery = `
-  SELECT 
-    c.*,
-    p.nombre,
-    p.aPaterno as apellido_paterno,    
-    p.aMaterno as apellido_materno,     
-    s.title as servicio_nombre
-  FROM citas c
-  LEFT JOIN pacientes p ON c.paciente_id = p.id
-  LEFT JOIN servicios s ON c.servicio_id = s.id
-  WHERE c.id = ?                      
-`;
+      SELECT 
+        c.*,
+        p.nombre,
+        p.aPaterno as apellido_paterno,    
+        p.aMaterno as apellido_materno,     
+        s.title as servicio_nombre
+      FROM citas c
+      LEFT JOIN pacientes p ON c.paciente_id = p.id
+      LEFT JOIN servicios s ON c.servicio_id = s.id
+      WHERE c.id = ?                      
+    `;
 
     db.query(citaQuery, [cita_id], async (err, results) => {
       if (err) {
@@ -727,13 +715,11 @@ router.post("/send-reminder", async (req, res) => {
       }
 
       const citaInfo = results[0];
-      const nombreCompleto = `${citaInfo.nombre} ${
-        citaInfo.apellido_paterno || ""
-      } ${citaInfo.apellido_materno || ""}`.trim();
+      const nombreCompleto = `${citaInfo.nombre} ${citaInfo.apellido_paterno || ""} ${citaInfo.apellido_materno || ""}`.trim();
       const fechaCita = new Date(citaInfo.fecha_consulta);
       const fechaFormateada = fechaCita.toLocaleDateString("es-ES", {
         weekday: "long",
-        year: "numeric",
+        year: "numeric", 
         month: "long",
         day: "numeric",
       });
@@ -742,7 +728,6 @@ router.post("/send-reminder", async (req, res) => {
         minute: "2-digit",
       });
 
-      // Formatear el contenido HTML del correo para recordatorio
       const mailOptions = {
         from: '"Odontología Carol" <sistema@odontologiacarol.com>',
         to: email,
@@ -759,10 +744,10 @@ router.post("/send-reminder", async (req, res) => {
                   
                   <div style="margin: 25px 0; padding: 20px; background-color: #ffebee; border-left: 4px solid #d32f2f; border-radius: 4px;">
                       <h3 style="color: #d32f2f; font-weight: 500; font-size: 16px; margin: 0 0 10px;">
-                          Confirmación Requerida
+                          Confirmación Requerida - Alto Riesgo de Inasistencia
                       </h3>
                       <p style="color: #c62828; font-size: 14px; margin: 0; line-height: 1.4;">
-                          Nuestro sistema ha detectado un alto riesgo de inasistencia para tu próxima cita. 
+                          Nuestro sistema de inteligencia artificial ha detectado un <b>alto riesgo de inasistencia</b> para tu próxima cita. 
                           <b>Por favor confirma tu asistencia</b> para evitar la cancelación automática.
                       </p>
                   </div>
@@ -780,9 +765,7 @@ router.post("/send-reminder", async (req, res) => {
                           </tr>
                           <tr>
                               <td style="padding: 8px 0; font-weight: 500; color: #555;">Servicio:</td>
-                              <td style="padding: 8px 0; color: #333;">${
-                                citaInfo.servicio_nombre || "Consulta General"
-                              }</td>
+                              <td style="padding: 8px 0; color: #333;">${citaInfo.servicio_nombre || "Consulta General"}</td>
                           </tr>
                       </table>
                   </div>
@@ -832,15 +815,13 @@ router.post("/send-reminder", async (req, res) => {
       };
 
       try {
-        // Enviar el email
         const info = await transporter.sendMail(mailOptions);
         console.log("Recordatorio enviado exitosamente:", info.messageId);
 
-        // Opcional: Registrar el envío en las notas de la cita existente
         const updateNotasQuery = `
           UPDATE citas 
           SET notas = CONCAT(COALESCE(notas, ''), '\n[RECORDATORIO ENVIADO] ', NOW(), ' - Email alto riesgo enviado a ${email}')
-          WHERE consulta_id = ?
+          WHERE id = ?
         `;
 
         db.query(updateNotasQuery, [cita_id], (updateErr) => {
