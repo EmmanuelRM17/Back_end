@@ -68,8 +68,10 @@ const getPacienteHistorial = (pacienteId, citaActualId = null) => {
         // Asegurar que no haya valores null
         historial.total_citas = historial.total_citas || 0;
         historial.total_no_shows = historial.total_no_shows || 0;
-        historial.pct_no_show_historico = parseFloat(historial.pct_no_show_historico) || 0.0;
-        historial.dias_desde_ultima_cita = historial.dias_desde_ultima_cita || 0;
+        historial.pct_no_show_historico =
+          parseFloat(historial.pct_no_show_historico) || 0.0;
+        historial.dias_desde_ultima_cita =
+          historial.dias_desde_ultima_cita || 0;
 
         console.log("Historial obtenido para paciente:", pacienteId, historial);
         resolve(historial);
@@ -164,14 +166,15 @@ const formatearDatosCita = (citaData, historial) => {
 
     // Datos del paciente
     paciente_genero: citaData.paciente_genero || citaData.genero,
-    paciente_fecha_nacimiento: citaData.paciente_fecha_nacimiento || citaData.fecha_nacimiento,
+    paciente_fecha_nacimiento:
+      citaData.paciente_fecha_nacimiento || citaData.fecha_nacimiento,
     paciente_alergias: citaData.paciente_alergias || citaData.alergias,
 
     // Datos de la cita
-    categoria_servicio: citaData.categoria_servicio || 'General',
+    categoria_servicio: citaData.categoria_servicio || "General",
     precio_servicio: parseFloat(citaData.precio_servicio || 600),
     duracion: parseInt(citaData.duracion || 30),
-    estado_pago: citaData.estado_pago || 'Pendiente',
+    estado_pago: citaData.estado_pago || "Pendiente",
     tratamiento_pendiente: citaData.tratamiento_pendiente ? 1 : 0,
 
     // Historial del paciente (sin data leakage)
@@ -195,18 +198,22 @@ router.post("/predict-no-show", async (req, res) => {
     console.log("=== NUEVA PREDICCIÓN ML ===");
     console.log("Datos recibidos:", JSON.stringify(citaData, null, 2));
 
-    if (!citaData || !citaData.paciente_id) {
+    if (!citaData || !citaData.fecha_consulta) {
       return res.status(400).json({
         success: false,
-        error: "Datos de cita incompletos. Se requiere paciente_id.",
+        error:
+          "Datos de cita incompletos. Se requiere al menos fecha_consulta.",
       });
     }
 
     try {
       // Obtener historial SIN incluir la cita actual (evita data leakage)
       const citaId = citaData.cita_id || citaData.id;
-      const historial = await getPacienteHistorial(citaData.paciente_id, citaId);
-      
+      const historial = await getPacienteHistorial(
+        citaData.paciente_id,
+        citaId
+      );
+
       console.log("Historial obtenido:", historial);
 
       // Formatear datos para el modelo ML
@@ -226,7 +233,7 @@ router.post("/predict-no-show", async (req, res) => {
       // Interpretar resultado (1 = No Show, 0 = Asistirá)
       const willNoShow = prediccion.prediction.will_no_show === 1;
       const probability = prediccion.prediction.probability || 0;
-      
+
       console.log("=== PREDICCIÓN EXITOSA ===");
       console.log("Resultado binario:", prediccion.prediction.will_no_show);
       console.log("Probabilidad:", probability);
@@ -239,25 +246,32 @@ router.post("/predict-no-show", async (req, res) => {
           prediction_binary: prediccion.prediction.will_no_show,
           probability: probability,
           risk_level: willNoShow ? "ALTO" : "BAJO",
-          confidence: probability > 0.7 ? "ALTA" : probability > 0.4 ? "MEDIA" : "BAJA",
-          mensaje: willNoShow 
-            ? `El modelo predice que este paciente probablemente NO asistirá (${(probability * 100).toFixed(1)}% probabilidad)`
-            : `El modelo predice que este paciente probablemente SÍ asistirá (${((1 - probability) * 100).toFixed(1)}% probabilidad)`,
-          features_debug: prediccion.prediction.features_used || null
+          confidence:
+            probability > 0.7 ? "ALTA" : probability > 0.4 ? "MEDIA" : "BAJA",
+          mensaje: willNoShow
+            ? `El modelo predice que este paciente probablemente NO asistirá (${(
+                probability * 100
+              ).toFixed(1)}% probabilidad)`
+            : `El modelo predice que este paciente probablemente SÍ asistirá (${(
+                (1 - probability) *
+                100
+              ).toFixed(1)}% probabilidad)`,
+          features_debug: prediccion.prediction.features_used || null,
         },
         historial_paciente: {
           total_citas: historial.total_citas,
           total_no_shows: historial.total_no_shows,
-          porcentaje_no_show: (historial.pct_no_show_historico * 100).toFixed(1) + '%',
-          dias_ultima_cita: historial.dias_desde_ultima_cita
-        }
+          porcentaje_no_show:
+            (historial.pct_no_show_historico * 100).toFixed(1) + "%",
+          dias_ultima_cita: historial.dias_desde_ultima_cita,
+        },
       });
-
     } catch (historialError) {
       console.error("Error obteniendo historial del paciente:", historialError);
       return res.status(500).json({
         success: false,
-        error: "Error obteniendo historial del paciente: " + historialError.message,
+        error:
+          "Error obteniendo historial del paciente: " + historialError.message,
       });
     }
   } catch (error) {
@@ -289,7 +303,11 @@ router.post("/predict-batch", async (req, res) => {
 
     for (let i = 0; i < citas.length; i++) {
       const cita = citas[i];
-      console.log(`Procesando cita ${i + 1}/${citas.length} - ID: ${cita.id || cita.cita_id}`);
+      console.log(
+        `Procesando cita ${i + 1}/${citas.length} - ID: ${
+          cita.id || cita.cita_id
+        }`
+      );
 
       try {
         if (!cita.paciente_id) {
@@ -317,7 +335,7 @@ router.post("/predict-batch", async (req, res) => {
         } else {
           const willNoShow = prediccion.prediction.will_no_show === 1;
           const probability = prediccion.prediction.probability || 0;
-          
+
           predicciones.push({
             cita_id: citaId,
             success: true,
@@ -326,7 +344,12 @@ router.post("/predict-batch", async (req, res) => {
               prediction_binary: prediccion.prediction.will_no_show,
               probability: probability,
               risk_level: willNoShow ? "ALTO" : "BAJO",
-              confidence: probability > 0.7 ? "ALTA" : probability > 0.4 ? "MEDIA" : "BAJA"
+              confidence:
+                probability > 0.7
+                  ? "ALTA"
+                  : probability > 0.4
+                  ? "MEDIA"
+                  : "BAJA",
             },
             error: null,
           });
@@ -334,9 +357,8 @@ router.post("/predict-batch", async (req, res) => {
 
         // Pequeña pausa entre predicciones para no sobrecargar
         if (i < citas.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 100));
+          await new Promise((resolve) => setTimeout(resolve, 100));
         }
-
       } catch (error) {
         console.error(`Error procesando cita ${i + 1}:`, error);
         predicciones.push({
@@ -348,11 +370,15 @@ router.post("/predict-batch", async (req, res) => {
       }
     }
 
-    const successful = predicciones.filter(p => p.success);
-    const altoRiesgo = successful.filter(p => p.prediction.will_no_show).length;
+    const successful = predicciones.filter((p) => p.success);
+    const altoRiesgo = successful.filter(
+      (p) => p.prediction.will_no_show
+    ).length;
 
     console.log(`=== BATCH COMPLETADO ===`);
-    console.log(`Total: ${predicciones.length}, Exitosas: ${successful.length}, Alto riesgo: ${altoRiesgo}`);
+    console.log(
+      `Total: ${predicciones.length}, Exitosas: ${successful.length}, Alto riesgo: ${altoRiesgo}`
+    );
 
     res.json({
       success: true,
@@ -360,12 +386,18 @@ router.post("/predict-batch", async (req, res) => {
       summary: {
         total: predicciones.length,
         successful: successful.length,
-        failed: predicciones.filter(p => !p.success).length,
+        failed: predicciones.filter((p) => !p.success).length,
         alto_riesgo: altoRiesgo,
         bajo_riesgo: successful.length - altoRiesgo,
-        promedio_probabilidad: successful.length > 0 
-          ? (successful.reduce((sum, p) => sum + (p.prediction.probability || 0), 0) / successful.length).toFixed(3)
-          : 0
+        promedio_probabilidad:
+          successful.length > 0
+            ? (
+                successful.reduce(
+                  (sum, p) => sum + (p.prediction.probability || 0),
+                  0
+                ) / successful.length
+              ).toFixed(3)
+            : 0,
       },
     });
   } catch (error) {
@@ -383,36 +415,35 @@ router.post("/predict-batch", async (req, res) => {
 router.post("/debug-features", async (req, res) => {
   try {
     const citaData = req.body;
-    
+
     if (!citaData.paciente_id) {
       return res.status(400).json({
         success: false,
-        error: "Se requiere paciente_id para debug"
+        error: "Se requiere paciente_id para debug",
       });
     }
 
     const citaId = citaData.cita_id || citaData.id;
     const historial = await getPacienteHistorial(citaData.paciente_id, citaId);
     const datosMl = formatearDatosCita(citaData, historial);
-    
+
     // Agregar flag de debug
     datosMl.debug = true;
-    
+
     const debugResult = await callPythonPredictor(datosMl);
-    
+
     res.json({
       success: true,
       debug_info: debugResult,
       datos_originales: citaData,
       historial_calculado: historial,
-      datos_ml_formateados: datosMl
+      datos_ml_formateados: datosMl,
     });
-    
   } catch (error) {
     console.error("Error en debug:", error);
     res.status(500).json({
       success: false,
-      error: error.message
+      error: error.message,
     });
   }
 });
@@ -430,25 +461,38 @@ router.get("/model-info", (req, res) => {
       output_type: "binary_classification_with_probability",
       classes: {
         0: "Asistirá a la cita",
-        1: "No asistirá (No-Show)"
+        1: "No asistirá (No-Show)",
       },
       probability: "Devuelve probabilidad de no-show (0.0 a 1.0)",
       features: [
-        "edad", "genero", "alergias_flag", "lead_time_days", "dow", "hour", 
-        "is_weekend", "categoria_servicio", "precio_servicio", "duration_min",
-        "paid_flag", "tratamiento_pendiente", "total_citas", "total_no_shows", 
-        "pct_no_show_historico", "dias_desde_ultima_cita"
+        "edad",
+        "genero",
+        "alergias_flag",
+        "lead_time_days",
+        "dow",
+        "hour",
+        "is_weekend",
+        "categoria_servicio",
+        "precio_servicio",
+        "duration_min",
+        "paid_flag",
+        "tratamiento_pendiente",
+        "total_citas",
+        "total_no_shows",
+        "pct_no_show_historico",
+        "dias_desde_ultima_cita",
       ],
       available: true,
       data_leakage_protection: true,
-      description: "Modelo RandomForest entrenado para predecir inasistencias con protección contra data leakage",
+      description:
+        "Modelo RandomForest entrenado para predecir inasistencias con protección contra data leakage",
     },
     endpoints: {
       predict_single: "POST /api/ml/predict-no-show",
-      predict_batch: "POST /api/ml/predict-batch", 
+      predict_batch: "POST /api/ml/predict-batch",
       debug_features: "POST /api/ml/debug-features",
       model_info: "GET /api/ml/model-info",
-      health: "GET /api/ml/health"
+      health: "GET /api/ml/health",
     },
   });
 });
@@ -463,7 +507,7 @@ router.get("/health", (req, res) => {
     timestamp: new Date().toISOString(),
     message: "ML Predictions service running correctly",
     model_type: "binary_classification_with_probability",
-    version: "1.0.1"
+    version: "1.0.1",
   });
 });
 
@@ -609,7 +653,8 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           fecha_nacimiento: citaDetalles.fecha_nacimiento,
           edad: citaDetalles.fecha_nacimiento
             ? Math.floor(
-                (Date.now() - new Date(citaDetalles.fecha_nacimiento).getTime()) /
+                (Date.now() -
+                  new Date(citaDetalles.fecha_nacimiento).getTime()) /
                   (365.25 * 24 * 60 * 60 * 1000)
               )
             : null,
@@ -626,8 +671,10 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           odontologo_nombre: citaDetalles.odontologo_nombre,
 
           total_citas_historicas: citaDetalles.total_citas_historicas || 0,
-          total_no_shows_historicas: citaDetalles.total_no_shows_historicas || 0,
-          pct_no_show_historico: parseFloat(citaDetalles.pct_no_show_historico) || 0.0,
+          total_no_shows_historicas:
+            citaDetalles.total_no_shows_historicas || 0,
+          pct_no_show_historico:
+            parseFloat(citaDetalles.pct_no_show_historico) || 0.0,
           dias_desde_ultima_cita: citaDetalles.dias_desde_ultima_cita || 0,
 
           estado_pago: citaDetalles.estado_pago,
@@ -642,9 +689,12 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
                 )
               : 0,
           dia_semana: citaDetalles.fecha_consulta
-            ? new Date(citaDetalles.fecha_consulta).toLocaleDateString("es-ES", {
-                weekday: "long",
-              })
+            ? new Date(citaDetalles.fecha_consulta).toLocaleDateString(
+                "es-ES",
+                {
+                  weekday: "long",
+                }
+              )
             : null,
           hora_cita: citaDetalles.fecha_consulta
             ? new Date(citaDetalles.fecha_consulta).getHours()
@@ -673,13 +723,17 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
           factor: "Paciente no registrado",
           valor: "Sin historial",
           impacto: "Alto",
-          descripcion: "Los pacientes no registrados tienen mayor riesgo de inasistencia",
+          descripcion:
+            "Los pacientes no registrados tienen mayor riesgo de inasistencia",
         });
       } else if (response.detalles.pct_no_show_historico > 0.2) {
         factores.push({
           factor: "Historial de inasistencias",
-          valor: `${(response.detalles.pct_no_show_historico * 100).toFixed(1)}%`,
-          impacto: response.detalles.pct_no_show_historico > 0.4 ? "Alto" : "Medio",
+          valor: `${(response.detalles.pct_no_show_historico * 100).toFixed(
+            1
+          )}%`,
+          impacto:
+            response.detalles.pct_no_show_historico > 0.4 ? "Alto" : "Medio",
         });
       }
 
@@ -722,7 +776,11 @@ router.get("/estadisticas-predicciones", async (req, res) => {
 
     switch (periodo) {
       case "hoy":
-        fechaInicio = new Date(ahora.getFullYear(), ahora.getMonth(), ahora.getDate());
+        fechaInicio = new Date(
+          ahora.getFullYear(),
+          ahora.getMonth(),
+          ahora.getDate()
+        );
         break;
       case "semana":
         fechaInicio = new Date(ahora.getTime() - 7 * 24 * 60 * 60 * 1000);
@@ -766,9 +824,13 @@ router.get("/estadisticas-predicciones", async (req, res) => {
           citas_canceladas: stats.citas_canceladas,
           precio_promedio: parseFloat(stats.precio_promedio) || 0,
           tasa_completacion:
-            stats.total_citas > 0 ? ((stats.citas_completadas / stats.total_citas) * 100).toFixed(1) : 0,
+            stats.total_citas > 0
+              ? ((stats.citas_completadas / stats.total_citas) * 100).toFixed(1)
+              : 0,
           tasa_cancelacion:
-            stats.total_citas > 0 ? ((stats.citas_canceladas / stats.total_citas) * 100).toFixed(1) : 0,
+            stats.total_citas > 0
+              ? ((stats.citas_canceladas / stats.total_citas) * 100).toFixed(1)
+              : 0,
         },
       });
     });
@@ -828,11 +890,13 @@ router.post("/send-reminder", async (req, res) => {
       }
 
       const citaInfo = results[0];
-      const nombreCompleto = `${citaInfo.nombre} ${citaInfo.apellido_paterno || ""} ${citaInfo.apellido_materno || ""}`.trim();
+      const nombreCompleto = `${citaInfo.nombre} ${
+        citaInfo.apellido_paterno || ""
+      } ${citaInfo.apellido_materno || ""}`.trim();
       const fechaCita = new Date(citaInfo.fecha_consulta);
       const fechaFormateada = fechaCita.toLocaleDateString("es-ES", {
         weekday: "long",
-        year: "numeric", 
+        year: "numeric",
         month: "long",
         day: "numeric",
       });
@@ -878,7 +942,9 @@ router.post("/send-reminder", async (req, res) => {
                           </tr>
                           <tr>
                               <td style="padding: 8px 0; font-weight: 500; color: #555;">Servicio:</td>
-                              <td style="padding: 8px 0; color: #333;">${citaInfo.servicio_nombre || "Consulta General"}</td>
+                              <td style="padding: 8px 0; color: #333;">${
+                                citaInfo.servicio_nombre || "Consulta General"
+                              }</td>
                           </tr>
                       </table>
                   </div>
