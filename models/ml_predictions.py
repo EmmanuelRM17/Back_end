@@ -83,20 +83,24 @@ def encode_categoria(categoria_str):
         'especialidad': 2,
         'General': 3,
         'general': 3,
-        'Implantologia': 4,
-        'implantologia': 4,
-        'Ortodoncia': 5,
-        'ortodoncia': 5,
-        'Periodoncia': 6,
-        'periodoncia': 6,
-        'Protesis': 7,
-        'Prótesis': 7,
-        'protesis': 7,
-        'prótesis': 7,
-        'Restauracion': 8,
-        'Restauración': 8,
-        'restauracion': 8,
-        'restauración': 8
+        'Higiene': 4,  # ✅ AGREGADO
+        'higiene': 4,  # ✅ AGREGADO
+        'Implantologia': 5,
+        'implantologia': 5,
+        'Ortodoncia': 6,
+        'ortodoncia': 6,
+        'Periodoncia': 7,
+        'periodoncia': 7,
+        'Preventivo': 8,  # ✅ AGREGADO
+        'preventivo': 8,  # ✅ AGREGADO
+        'Protesis': 9,
+        'Prótesis': 9,
+        'protesis': 9,
+        'prótesis': 9,
+        'Restauracion': 10,
+        'Restauración': 10,
+        'restauracion': 10,
+        'restauración': 10
     }
     return categoria_map.get(str(categoria_str).strip(), 3)  # Default General
 
@@ -123,10 +127,14 @@ def extract_features(cita_data):
     except:
         fecha_consulta = datetime.now()
     
+    # Log información del paciente
+    es_registrado = cita_data.get('paciente_id') is not None
+    print(f"Procesando paciente {'registrado' if es_registrado else 'NO registrado'}", file=sys.stderr)
+    
     # Las 16 features en el orden EXACTO del entrenamiento
     features = [
         calculate_age(cita_data.get('paciente_fecha_nacimiento')),  # edad
-        encode_genero(cita_data.get('paciente_genero')),  # genero
+        encode_genero(cita_data.get('paciente_genero', 'Femenino')),  # genero
         1 if cita_data.get('paciente_alergias') else 0,  # alergias_flag
         calculate_lead_time(cita_data.get('fecha_solicitud'), cita_data.get('fecha_consulta')),  # lead_time_days
         get_mysql_dayofweek(fecha_consulta),  # dow (MySQL DAYOFWEEK)
@@ -137,11 +145,24 @@ def extract_features(cita_data):
         safe_float(cita_data.get('duracion', 30)),  # duration_min
         1 if str(cita_data.get('estado_pago', '')).strip() == 'Pagado' else 0,  # paid_flag
         safe_int(cita_data.get('tratamiento_pendiente', 0)),  # tratamiento_pendiente
-        safe_float(cita_data.get('total_citas_historicas', 0)),  # total_citas
+        safe_float(cita_data.get('total_citas_historicas', 0)),  # total_citas (puede ser 0 para no registrados)
         safe_float(cita_data.get('total_no_shows_historicas', 0)),  # total_no_shows
         safe_float(cita_data.get('pct_no_show_historico', 0.0)),  # pct_no_show_historico
         safe_float(cita_data.get('dias_desde_ultima_cita', 0))  # dias_desde_ultima_cita
     ]
+    
+    # Log features para debugging
+    feature_names = [
+        'edad', 'genero', 'alergias_flag', 'lead_time_days', 'dow', 'hour', 
+        'is_weekend', 'categoria_servicio', 'precio_servicio', 'duration_min',
+        'paid_flag', 'tratamiento_pendiente', 'total_citas', 'total_no_shows', 
+        'pct_no_show_historico', 'dias_desde_ultima_cita'
+    ]
+    
+    print(f"Features extraídas:", file=sys.stderr)
+    for name, value in zip(feature_names, features):
+        print(f"  {name}: {value}", file=sys.stderr)
+    
     return features
 
 def predict_no_show(cita_data):
