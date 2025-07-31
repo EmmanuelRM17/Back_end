@@ -19,11 +19,12 @@ const transporter = nodemailer.createTransport({
 });
 
 /**
- * Obtener historial de no-shows del paciente desde la BD
+ * Obtener historial de no-shows del paciente - CORREGIDO para evitar data leakage
  */
-const getPacienteHistorial = (pacienteId) => {
+const getPacienteHistorial = (pacienteId, citaActualId = null) => {
   return new Promise((resolve, reject) => {
-    const query = `
+    // Query corregido: excluye la cita actual para evitar data leakage
+    let query = `
       SELECT 
         COUNT(*) as total_citas,
         SUM(CASE WHEN estado IN ('Cancelada', 'No llegó') THEN 1 ELSE 0 END) as total_no_shows,
@@ -38,24 +39,36 @@ const getPacienteHistorial = (pacienteId) => {
       FROM citas 
       WHERE paciente_id = ? 
       AND fecha_consulta < NOW()
+      AND archivado = 0
     `;
 
-    db.query(query, [pacienteId], (err, results) => {
+    let params = [pacienteId];
+
+    // Si hay cita actual, excluirla del historial para evitar data leakage
+    if (citaActualId) {
+      query += " AND id != ?";
+      params.push(citaActualId);
+    }
+
+    console.log("Query historial:", query);
+    console.log("Parámetros:", params);
+
+    db.query(query, params, (err, results) => {
       if (err) {
         console.error("Error en query historial:", err);
         reject(err);
       } else {
         const historial = results[0] || {
-          total_citas: 1,
+          total_citas: 0,
           total_no_shows: 0,
           pct_no_show_historico: 0.0,
           dias_desde_ultima_cita: 0,
         };
 
         // Asegurar que no haya valores null
-        historial.total_citas = historial.total_citas || 1;
+        historial.total_citas = historial.total_citas || 0;
         historial.total_no_shows = historial.total_no_shows || 0;
-        historial.pct_no_show_historico = historial.pct_no_show_historico || 0.0;
+        historial.pct_no_show_historico = parseFloat(historial.pct_no_show_historico) || 0.0;
         historial.dias_desde_ultima_cita = historial.dias_desde_ultima_cita || 0;
 
         console.log("Historial obtenido para paciente:", pacienteId, historial);
@@ -66,14 +79,15 @@ const getPacienteHistorial = (pacienteId) => {
 };
 
 /**
- * Llamar al script Python para hacer predicción ML
+ * Llamar al script Python - MEJORADO con mejor manejo de errores
  */
 const callPythonPredictor = (citaData) => {
   return new Promise((resolve, reject) => {
     const pythonScript = path.join(__dirname, "../../models/ml_predictions.py");
 
-    console.log("Ejecutando script Python:", pythonScript);
-    console.log("Datos enviados al modelo:", JSON.stringify(citaData, null, 2));
+    console.log("=== LLAMANDO SCRIPT PYTHON ===");
+    console.log("Script:", pythonScript);
+    console.log("Datos enviados:", JSON.stringify(citaData, null, 2));
 
     const pythonCommand = process.platform === "win32" ? "python" : "python3";
     const pythonProcess = spawn(pythonCommand, [pythonScript]);
@@ -90,32 +104,40 @@ const callPythonPredictor = (citaData) => {
 
     pythonProcess.stderr.on("data", (data) => {
       error += data.toString();
-      console.error("Error Python stderr:", data.toString());
+      console.error("Python stderr:", data.toString());
     });
 
     pythonProcess.on("close", (code) => {
       console.log(`Proceso Python terminó con código: ${code}`);
-      console.log("Resultado Python:", result);
+      console.log("Resultado Python raw:", result);
 
       if (code !== 0) {
-        console.error("Error Python:", error);
+        console.error("Error Python completo:", error);
         reject(new Error(`Script Python falló (código ${code}): ${error}`));
       } else {
         try {
           const parsedResult = JSON.parse(result.trim());
+          console.log("Resultado Python parseado:", parsedResult);
           resolve(parsedResult);
         } catch (parseError) {
           console.error("Error parseando resultado Python:", parseError);
+          console.error("Resultado raw que falló:", result);
           reject(new Error(`Error parseando resultado: ${parseError.message}`));
         }
       }
     });
 
+    pythonProcess.on("error", (spawnError) => {
+      console.error("Error ejecutando Python:", spawnError);
+      reject(new Error(`Error ejecutando Python: ${spawnError.message}`));
+    });
+
+    // Timeout aumentado y mejorado
     const timeout = setTimeout(() => {
-      console.log("Timeout en predicción ML");
-      pythonProcess.kill();
-      reject(new Error("Timeout en predicción ML (30s)"));
-    }, 30000);
+      console.log("Timeout en predicción ML - matando proceso");
+      pythonProcess.kill("SIGKILL");
+      reject(new Error("Timeout en predicción ML (45s)"));
+    }, 45000);
 
     pythonProcess.on("close", () => {
       clearTimeout(timeout);
@@ -124,14 +146,53 @@ const callPythonPredictor = (citaData) => {
 };
 
 /**
- * Endpoint principal para predicción de no-show
- * POST /api/ml/predict-no-show
+ * Formatear datos de cita para el modelo ML
+ */
+const formatearDatosCita = (citaData, historial) => {
+  console.log("=== FORMATEANDO DATOS PARA ML ===");
+  console.log("Cita original:", citaData);
+  console.log("Historial:", historial);
+
+  const datosMl = {
+    // Identificadores
+    cita_id: citaData.cita_id || citaData.id,
+    paciente_id: citaData.paciente_id,
+
+    // Fechas (formato ISO para Python)
+    fecha_consulta: citaData.fecha_consulta,
+    fecha_solicitud: citaData.fecha_solicitud || citaData.fecha_consulta,
+
+    // Datos del paciente
+    paciente_genero: citaData.paciente_genero || citaData.genero,
+    paciente_fecha_nacimiento: citaData.paciente_fecha_nacimiento || citaData.fecha_nacimiento,
+    paciente_alergias: citaData.paciente_alergias || citaData.alergias,
+
+    // Datos de la cita
+    categoria_servicio: citaData.categoria_servicio || 'General',
+    precio_servicio: parseFloat(citaData.precio_servicio || 600),
+    duracion: parseInt(citaData.duracion || 30),
+    estado_pago: citaData.estado_pago || 'Pendiente',
+    tratamiento_pendiente: citaData.tratamiento_pendiente ? 1 : 0,
+
+    // Historial del paciente (sin data leakage)
+    total_citas_historicas: historial.total_citas,
+    total_no_shows_historicas: historial.total_no_shows,
+    pct_no_show_historico: historial.pct_no_show_historico,
+    dias_desde_ultima_cita: historial.dias_desde_ultima_cita,
+  };
+
+  console.log("Datos ML formateados:", datosMl);
+  return datosMl;
+};
+
+/**
+ * Endpoint principal para predicción de no-show - CORREGIDO
  */
 router.post("/predict-no-show", async (req, res) => {
   try {
     const citaData = req.body;
 
-    console.log("=== PREDICCIÓN ML SOLICITADA ===");
+    console.log("=== NUEVA PREDICCIÓN ML ===");
     console.log("Datos recibidos:", JSON.stringify(citaData, null, 2));
 
     if (!citaData || !citaData.paciente_id) {
@@ -142,19 +203,17 @@ router.post("/predict-no-show", async (req, res) => {
     }
 
     try {
-      const historial = await getPacienteHistorial(citaData.paciente_id);
+      // Obtener historial SIN incluir la cita actual (evita data leakage)
+      const citaId = citaData.cita_id || citaData.id;
+      const historial = await getPacienteHistorial(citaData.paciente_id, citaId);
+      
+      console.log("Historial obtenido:", historial);
 
-      const citaCompleta = {
-        ...citaData,
-        total_citas_historicas: historial.total_citas,
-        total_no_shows_historicas: historial.total_no_shows,
-        pct_no_show_historico: historial.pct_no_show_historico,
-        dias_desde_ultima_cita: historial.dias_desde_ultima_cita,
-      };
+      // Formatear datos para el modelo ML
+      const datosMl = formatearDatosCita(citaData, historial);
 
-      console.log("Cita con historial:", JSON.stringify(citaCompleta, null, 2));
-
-      const prediccion = await callPythonPredictor(citaCompleta);
+      // Llamar al modelo
+      const prediccion = await callPythonPredictor(datosMl);
 
       if (prediccion.error) {
         console.error("Error en modelo ML:", prediccion.error);
@@ -164,11 +223,13 @@ router.post("/predict-no-show", async (req, res) => {
         });
       }
 
-      // Interpretar resultado binario (1 = No Show, 0 = Asistirá)
+      // Interpretar resultado (1 = No Show, 0 = Asistirá)
       const willNoShow = prediccion.prediction.will_no_show === 1;
+      const probability = prediccion.prediction.probability || 0;
       
       console.log("=== PREDICCIÓN EXITOSA ===");
-      console.log("Predicción binaria:", prediccion.prediction.will_no_show);
+      console.log("Resultado binario:", prediccion.prediction.will_no_show);
+      console.log("Probabilidad:", probability);
       console.log("Interpretación:", willNoShow ? "NO ASISTIRÁ" : "ASISTIRÁ");
 
       res.json({
@@ -176,10 +237,19 @@ router.post("/predict-no-show", async (req, res) => {
         prediction: {
           will_no_show: willNoShow,
           prediction_binary: prediccion.prediction.will_no_show,
+          probability: probability,
           risk_level: willNoShow ? "ALTO" : "BAJO",
+          confidence: probability > 0.7 ? "ALTA" : probability > 0.4 ? "MEDIA" : "BAJA",
           mensaje: willNoShow 
-            ? "El modelo predice que este paciente probablemente NO asistirá a su cita"
-            : "El modelo predice que este paciente probablemente SÍ asistirá a su cita"
+            ? `El modelo predice que este paciente probablemente NO asistirá (${(probability * 100).toFixed(1)}% probabilidad)`
+            : `El modelo predice que este paciente probablemente SÍ asistirá (${((1 - probability) * 100).toFixed(1)}% probabilidad)`,
+          features_debug: prediccion.prediction.features_used || null
+        },
+        historial_paciente: {
+          total_citas: historial.total_citas,
+          total_no_shows: historial.total_no_shows,
+          porcentaje_no_show: (historial.pct_no_show_historico * 100).toFixed(1) + '%',
+          dias_ultima_cita: historial.dias_desde_ultima_cita
         }
       });
 
@@ -187,7 +257,7 @@ router.post("/predict-no-show", async (req, res) => {
       console.error("Error obteniendo historial del paciente:", historialError);
       return res.status(500).json({
         success: false,
-        error: "Error obteniendo historial del paciente",
+        error: "Error obteniendo historial del paciente: " + historialError.message,
       });
     }
   } catch (error) {
@@ -200,7 +270,7 @@ router.post("/predict-no-show", async (req, res) => {
 });
 
 /**
- * Endpoint para predicciones en lote (múltiples citas)
+ * Endpoint para predicciones en lote - CORREGIDO
  */
 router.post("/predict-batch", async (req, res) => {
   try {
@@ -219,7 +289,7 @@ router.post("/predict-batch", async (req, res) => {
 
     for (let i = 0; i < citas.length; i++) {
       const cita = citas[i];
-      console.log(`Procesando cita ${i + 1}/${citas.length}`);
+      console.log(`Procesando cita ${i + 1}/${citas.length} - ID: ${cita.id || cita.cita_id}`);
 
       try {
         if (!cita.paciente_id) {
@@ -232,37 +302,41 @@ router.post("/predict-batch", async (req, res) => {
           continue;
         }
 
-        const historial = await getPacienteHistorial(cita.paciente_id);
-        const citaCompleta = {
-          ...cita,
-          total_citas_historicas: historial.total_citas,
-          total_no_shows_historicas: historial.total_no_shows,
-          pct_no_show_historico: historial.pct_no_show_historico,
-          dias_desde_ultima_cita: historial.dias_desde_ultima_cita,
-        };
-
-        const prediccion = await callPythonPredictor(citaCompleta);
+        const citaId = cita.cita_id || cita.id;
+        const historial = await getPacienteHistorial(cita.paciente_id, citaId);
+        const datosMl = formatearDatosCita(cita, historial);
+        const prediccion = await callPythonPredictor(datosMl);
 
         if (prediccion.error) {
           predicciones.push({
-            cita_id: cita.cita_id || cita.id,
+            cita_id: citaId,
             success: false,
             prediction: null,
             error: prediccion.error,
           });
         } else {
           const willNoShow = prediccion.prediction.will_no_show === 1;
+          const probability = prediccion.prediction.probability || 0;
+          
           predicciones.push({
-            cita_id: cita.cita_id || cita.id,
+            cita_id: citaId,
             success: true,
             prediction: {
               will_no_show: willNoShow,
               prediction_binary: prediccion.prediction.will_no_show,
-              risk_level: willNoShow ? "ALTO" : "BAJO"
+              probability: probability,
+              risk_level: willNoShow ? "ALTO" : "BAJO",
+              confidence: probability > 0.7 ? "ALTA" : probability > 0.4 ? "MEDIA" : "BAJA"
             },
             error: null,
           });
         }
+
+        // Pequeña pausa entre predicciones para no sobrecargar
+        if (i < citas.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
       } catch (error) {
         console.error(`Error procesando cita ${i + 1}:`, error);
         predicciones.push({
@@ -288,7 +362,10 @@ router.post("/predict-batch", async (req, res) => {
         successful: successful.length,
         failed: predicciones.filter(p => !p.success).length,
         alto_riesgo: altoRiesgo,
-        bajo_riesgo: successful.length - altoRiesgo
+        bajo_riesgo: successful.length - altoRiesgo,
+        promedio_probabilidad: successful.length > 0 
+          ? (successful.reduce((sum, p) => sum + (p.prediction.probability || 0), 0) / successful.length).toFixed(3)
+          : 0
       },
     });
   } catch (error) {
@@ -301,43 +378,92 @@ router.post("/predict-batch", async (req, res) => {
 });
 
 /**
- * Información del modelo y status - CORREGIDO
+ * Endpoint de debug para probar features - NUEVO
+ */
+router.post("/debug-features", async (req, res) => {
+  try {
+    const citaData = req.body;
+    
+    if (!citaData.paciente_id) {
+      return res.status(400).json({
+        success: false,
+        error: "Se requiere paciente_id para debug"
+      });
+    }
+
+    const citaId = citaData.cita_id || citaData.id;
+    const historial = await getPacienteHistorial(citaData.paciente_id, citaId);
+    const datosMl = formatearDatosCita(citaData, historial);
+    
+    // Agregar flag de debug
+    datosMl.debug = true;
+    
+    const debugResult = await callPythonPredictor(datosMl);
+    
+    res.json({
+      success: true,
+      debug_info: debugResult,
+      datos_originales: citaData,
+      historial_calculado: historial,
+      datos_ml_formateados: datosMl
+    });
+    
+  } catch (error) {
+    console.error("Error en debug:", error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Información del modelo y status - MEJORADO
  */
 router.get("/model-info", (req, res) => {
   res.json({
     success: true,
     model_info: {
-      name: "No-Show Predictor",
+      name: "No-Show Predictor RandomForest",
       type: "RandomForestClassifier",
-      version: "1.0.0",
-      output_type: "binary_classification",
-      classes: [0, 1], // 0 = Asistirá, 1 = No Show
+      version: "1.0.1",
+      output_type: "binary_classification_with_probability",
+      classes: {
+        0: "Asistirá a la cita",
+        1: "No asistirá (No-Show)"
+      },
+      probability: "Devuelve probabilidad de no-show (0.0 a 1.0)",
       features: [
-        "edad",
-        "genero", 
-        "alergias_flag",
-        "lead_time_days",
-        "dow",
-        "hour",
-        "is_weekend", 
-        "categoria_servicio",
-        "precio_servicio",
-        "duration_min",
-        "paid_flag",
-        "tratamiento_pendiente",
-        "total_citas",
-        "total_no_shows", 
-        "pct_no_show_historico",
-        "dias_desde_ultima_cita"
+        "edad", "genero", "alergias_flag", "lead_time_days", "dow", "hour", 
+        "is_weekend", "categoria_servicio", "precio_servicio", "duration_min",
+        "paid_flag", "tratamiento_pendiente", "total_citas", "total_no_shows", 
+        "pct_no_show_historico", "dias_desde_ultima_cita"
       ],
       available: true,
-      description: "Modelo de clasificación binaria para predecir si un paciente asistirá (0) o no asistirá (1) a su cita",
+      data_leakage_protection: true,
+      description: "Modelo RandomForest entrenado para predecir inasistencias con protección contra data leakage",
     },
     endpoints: {
       predict_single: "POST /api/ml/predict-no-show",
       predict_batch: "POST /api/ml/predict-batch", 
+      debug_features: "POST /api/ml/debug-features",
       model_info: "GET /api/ml/model-info",
+      health: "GET /api/ml/health"
     },
+  });
+});
+
+/**
+ * Endpoint de salud - MEJORADO
+ */
+router.get("/health", (req, res) => {
+  res.json({
+    success: true,
+    status: "healthy",
+    timestamp: new Date().toISOString(),
+    message: "ML Predictions service running correctly",
+    model_type: "binary_classification_with_probability",
+    version: "1.0.1"
   });
 });
 
@@ -582,19 +708,6 @@ router.get("/cita-detalles/:citaId", async (req, res) => {
       error: `Error interno del servidor: ${error.message}`,
     });
   }
-});
-
-/**
- * Endpoint de prueba/salud
- */
-router.get("/health", (req, res) => {
-  res.json({
-    success: true,
-    status: "healthy",
-    timestamp: new Date().toISOString(),
-    message: "ML Predictions service is running",
-    model_type: "binary_classification"
-  });
 });
 
 /**

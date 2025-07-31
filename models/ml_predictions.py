@@ -12,8 +12,10 @@ try:
     model = joblib.load(MODEL_PATH)
 except Exception as e:
     model = None
+    print(f"Error cargando modelo: {e}", file=sys.stderr)
 
 def safe_float(value, default=0.0):
+    """Convierte valor a float de forma segura"""
     if value is None:
         return default
     try:
@@ -22,6 +24,7 @@ def safe_float(value, default=0.0):
         return default
 
 def safe_int(value, default=0):
+    """Convierte valor a int de forma segura"""
     if value is None:
         return default
     try:
@@ -30,6 +33,7 @@ def safe_int(value, default=0):
         return default
 
 def calculate_age(birth_date):
+    """Calcula edad desde fecha de nacimiento"""
     if not birth_date:
         return 30
     try:
@@ -40,6 +44,7 @@ def calculate_age(birth_date):
         return 30
 
 def calculate_lead_time(fecha_solicitud, fecha_consulta):
+    """Calcula días entre solicitud y consulta"""
     if not fecha_solicitud or not fecha_consulta:
         return 1
     try:
@@ -50,40 +55,89 @@ def calculate_lead_time(fecha_solicitud, fecha_consulta):
         return 1
 
 def encode_genero(genero_str):
-    # Codificación igual que en entrenamiento (LabelEncoder)
-    genero_map = {'Femenino': 0, 'Masculino': 2}  # Basado en tu entrenamiento
-    return genero_map.get(str(genero_str).strip(), 1)
+    """Codifica género usando el mismo mapeo del entrenamiento"""
+    # LabelEncoder en orden alfabético: Femenino=0, Masculino=1
+    genero_map = {
+        'Femenino': 0,
+        'femenino': 0,
+        'F': 0,
+        'f': 0,
+        'Masculino': 1,
+        'masculino': 1,
+        'M': 1,
+        'm': 1
+    }
+    return genero_map.get(str(genero_str).strip(), 0)  # Default Femenino
 
 def encode_categoria(categoria_str):
-    # Mapeo basado en tu query original
+    """Codifica categoría de servicio usando mapeo del entrenamiento"""
+    # Basado en el orden alfabético que usaría LabelEncoder
     categoria_map = {
-        'General': 3, 'Periodoncia': 6, 'Restauración': 9,
-        'Protesis': 4, 'Prótesis': 4, 'Especialidad': 1
+        'Cirugia': 0,
+        'Cirugía': 0,
+        'cirugia': 0,
+        'cirugía': 0,
+        'Endodoncia': 1,
+        'endodoncia': 1,
+        'Especialidad': 2,
+        'especialidad': 2,
+        'General': 3,
+        'general': 3,
+        'Implantologia': 4,
+        'implantologia': 4,
+        'Ortodoncia': 5,
+        'ortodoncia': 5,
+        'Periodoncia': 6,
+        'periodoncia': 6,
+        'Protesis': 7,
+        'Prótesis': 7,
+        'protesis': 7,
+        'prótesis': 7,
+        'Restauracion': 8,
+        'Restauración': 8,
+        'restauracion': 8,
+        'restauración': 8
     }
-    return categoria_map.get(str(categoria_str).strip(), 3)
+    return categoria_map.get(str(categoria_str).strip(), 3)  # Default General
+
+def get_mysql_dayofweek(fecha_consulta):
+    """Convierte weekday de Python a DAYOFWEEK de MySQL"""
+    # Python: lunes=0, martes=1, ..., domingo=6
+    # MySQL: domingo=1, lunes=2, ..., sábado=7
+    python_weekday = fecha_consulta.weekday()
+    mysql_dayofweek = (python_weekday + 2) % 7
+    if mysql_dayofweek == 0:
+        mysql_dayofweek = 7
+    return mysql_dayofweek
+
+def is_weekend_mysql(fecha_consulta):
+    """Determina si es fin de semana usando lógica MySQL"""
+    mysql_dow = get_mysql_dayofweek(fecha_consulta)
+    return 1 if mysql_dow in [1, 7] else 0  # domingo=1, sábado=7
 
 def extract_features(cita_data):
+    """Extrae las 16 features exactamente como el modelo espera"""
     fecha_consulta_str = cita_data.get('fecha_consulta', '')
     try:
         fecha_consulta = datetime.fromisoformat(fecha_consulta_str.replace('Z', ''))
     except:
         fecha_consulta = datetime.now()
     
-    # EXACTAMENTE las 16 features del entrenamiento en el mismo orden
+    # Las 16 features en el orden EXACTO del entrenamiento
     features = [
         calculate_age(cita_data.get('paciente_fecha_nacimiento')),  # edad
         encode_genero(cita_data.get('paciente_genero')),  # genero
         1 if cita_data.get('paciente_alergias') else 0,  # alergias_flag
         calculate_lead_time(cita_data.get('fecha_solicitud'), cita_data.get('fecha_consulta')),  # lead_time_days
-        fecha_consulta.weekday() + 1,  # dow
+        get_mysql_dayofweek(fecha_consulta),  # dow (MySQL DAYOFWEEK)
         fecha_consulta.hour,  # hour
-        1 if fecha_consulta.weekday() >= 5 else 0,  # is_weekend
+        is_weekend_mysql(fecha_consulta),  # is_weekend (MySQL logic)
         encode_categoria(cita_data.get('categoria_servicio', 'General')),  # categoria_servicio
         safe_float(cita_data.get('precio_servicio', 600)),  # precio_servicio
         safe_float(cita_data.get('duracion', 30)),  # duration_min
         1 if str(cita_data.get('estado_pago', '')).strip() == 'Pagado' else 0,  # paid_flag
         safe_int(cita_data.get('tratamiento_pendiente', 0)),  # tratamiento_pendiente
-        safe_float(cita_data.get('total_citas_historicas', 1)),  # total_citas
+        safe_float(cita_data.get('total_citas_historicas', 0)),  # total_citas
         safe_float(cita_data.get('total_no_shows_historicas', 0)),  # total_no_shows
         safe_float(cita_data.get('pct_no_show_historico', 0.0)),  # pct_no_show_historico
         safe_float(cita_data.get('dias_desde_ultima_cita', 0))  # dias_desde_ultima_cita
@@ -91,13 +145,14 @@ def extract_features(cita_data):
     return features
 
 def predict_no_show(cita_data):
+    """Predice si un paciente faltará a su cita"""
     if not model:
         return {'error': 'Modelo no disponible'}
     
     try:
         features = extract_features(cita_data)
         
-        # Nombres exactos del entrenamiento
+        # Nombres exactos del entrenamiento (mismo orden)
         feature_names = [
             'edad', 'genero', 'alergias_flag', 'lead_time_days', 'dow', 'hour', 
             'is_weekend', 'categoria_servicio', 'precio_servicio', 'duration_min',
@@ -105,22 +160,50 @@ def predict_no_show(cita_data):
             'pct_no_show_historico', 'dias_desde_ultima_cita'
         ]
         
+        # Crear DataFrame exactamente como en el entrenamiento
         X = pd.DataFrame([features], columns=feature_names)
+        
+        # Hacer predicción
         prediction = int(model.predict(X)[0])
+        probability = float(model.predict_proba(X)[0, 1])  # Probabilidad de no-show
         
         return {
             'success': True,
             'prediction': {
-                'will_no_show': prediction
+                'will_no_show': prediction,  # 1 = No Show, 0 = Asistirá
+                'probability': probability,
+                'features_used': dict(zip(feature_names, features))
             }
         }
     except Exception as e:
         return {'error': f'Error en predicción: {str(e)}'}
 
+def debug_features(cita_data):
+    """Función auxiliar para debugging"""
+    try:
+        features = extract_features(cita_data)
+        feature_names = ['edad', 'genero', 'alergias_flag', 'lead_time_days', 'dow', 'hour', 
+                        'is_weekend', 'categoria_servicio', 'precio_servicio', 'duration_min',
+                        'paid_flag', 'tratamiento_pendiente', 'total_citas', 'total_no_shows', 
+                        'pct_no_show_historico', 'dias_desde_ultima_cita']
+        
+        return {
+            'features': dict(zip(feature_names, features)),
+            'raw_data': cita_data
+        }
+    except Exception as e:
+        return {'error': str(e)}
+
 if __name__ == "__main__":
     try:
         input_data = json.loads(sys.stdin.read())
-        result = predict_no_show(input_data)
+        
+        # Agregar modo debug si se especifica
+        if input_data.get('debug', False):
+            result = debug_features(input_data)
+        else:
+            result = predict_no_show(input_data)
+            
         print(json.dumps(result))
     except Exception as e:
         print(json.dumps({'error': str(e)}))
