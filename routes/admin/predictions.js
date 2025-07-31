@@ -8,7 +8,7 @@ const path = require("path");
 const db = require("../../db");
 
 // Configuración de nodemailer
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   host: "smtp.hostinger.com",
   port: 465,
   secure: true,
