@@ -457,60 +457,79 @@ router.get("/model-info", (req, res) => {
     models: {
       no_show_predictor: {
         name: "No-Show Predictor RandomForest",
-        type: "RandomForestClassifier", 
+        type: "RandomForestClassifier",
         version: "1.0.1",
         output_type: "binary_classification_with_probability",
         classes: {
           0: "Asistirá a la cita",
-          1: "No asistirá (No-Show)"
+          1: "No asistirá (No-Show)",
         },
         probability: "Devuelve probabilidad de no-show (0.0 a 1.0)",
         features: [
-          "edad", "genero", "alergias_flag", "lead_time_days", "dow", "hour",
-          "is_weekend", "categoria_servicio", "precio_servicio", "duration_min",
-          "paid_flag", "tratamiento_pendiente", "total_citas", "total_no_shows",
-          "pct_no_show_historico", "dias_desde_ultima_cita"
+          "edad",
+          "genero",
+          "alergias_flag",
+          "lead_time_days",
+          "dow",
+          "hour",
+          "is_weekend",
+          "categoria_servicio",
+          "precio_servicio",
+          "duration_min",
+          "paid_flag",
+          "tratamiento_pendiente",
+          "total_citas",
+          "total_no_shows",
+          "pct_no_show_historico",
+          "dias_desde_ultima_cita",
         ],
         available: true,
-        description: "Modelo RandomForest para predecir inasistencias con protección contra data leakage"
+        description:
+          "Modelo RandomForest para predecir inasistencias con protección contra data leakage",
       },
       patient_clustering: {
         name: "Patient Segmentation K-Means",
         type: "KMeans",
-        version: "1.0.0", 
+        version: "1.0.0",
         n_clusters: 3,
         segmentos: {
           0: "VIP - Clientes de alto valor",
           1: "REGULARES - Clientes con comportamiento estándar",
-          2: "PROBLEMÁTICOS - Clientes que requieren atención especial"
+          2: "PROBLEMÁTICOS - Clientes que requieren atención especial",
         },
         features: [
-          "gasto_total_citas", "ticket_promedio", "precio_maximo",
-          "citas_canceladas", "tratamientos_activos", "citas_pendientes_pago", 
-          "valor_tratamiento_promedio", "tasa_noshow"
+          "gasto_total_citas",
+          "ticket_promedio",
+          "precio_maximo",
+          "citas_canceladas",
+          "tratamientos_activos",
+          "citas_pendientes_pago",
+          "valor_tratamiento_promedio",
+          "tasa_noshow",
         ],
         preprocessing: "StandardScaler + Log transformation",
         available: true,
-        description: "Modelo K-Means para segmentación de pacientes basado en comportamiento"
-      }
+        description:
+          "Modelo K-Means para segmentación de pacientes basado en comportamiento",
+      },
     },
     endpoints: {
       // No-Show Prediction
       predict_no_show: "POST /api/ml/predict-no-show",
       predict_batch: "POST /api/ml/predict-batch",
       debug_features: "POST /api/ml/debug-features",
-      
-      // Patient Clustering  
+
+      // Patient Clustering
       classify_patient: "POST /api/ml/classify-patient/:id",
       classify_batch: "POST /api/ml/classify-patients-batch",
       segmentation_stats: "GET /api/ml/segmentation-stats",
       clustering_model_info: "GET /api/ml/clustering-model-info",
-      
+
       // General
       model_info: "GET /api/ml/model-info",
       health: "GET /api/ml/health",
-      cita_detalles: "GET /api/ml/cita-detalles/:citaId"
-    }
+      cita_detalles: "GET /api/ml/cita-detalles/:citaId",
+    },
   });
 });
 
@@ -1057,21 +1076,22 @@ router.post("/send-reminder", async (req, res) => {
   }
 });
 
-
-
 /**
  * Ejecuta el script de Python para clasificación de pacientes (clustering)
  */
 const executePatientClassification = (patientData) => {
   return new Promise((resolve, reject) => {
     const scriptPath = path.join(__dirname, "../../models/classify_patient.py");
-    
+
     console.log("=== LLAMANDO CLUSTERING SCRIPT ===");
     console.log("Script:", scriptPath);
     console.log("Datos enviados:", JSON.stringify(patientData, null, 2));
 
     const pythonCommand = process.platform === "win32" ? "python" : "python3";
-    const pythonProcess = spawn(pythonCommand, [scriptPath, JSON.stringify(patientData)]);
+    const pythonProcess = spawn(pythonCommand, [
+      scriptPath,
+      JSON.stringify(patientData),
+    ]);
 
     let result = "";
     let error = "";
@@ -1091,7 +1111,9 @@ const executePatientClassification = (patientData) => {
 
       if (code !== 0) {
         console.error("Error Python clustering completo:", error);
-        reject(new Error(`Script Python clustering falló (código ${code}): ${error}`));
+        reject(
+          new Error(`Script Python clustering falló (código ${code}): ${error}`)
+        );
       } else {
         try {
           const parsedResult = JSON.parse(result.trim());
@@ -1099,14 +1121,20 @@ const executePatientClassification = (patientData) => {
           resolve(parsedResult);
         } catch (parseError) {
           console.error("Error parseando resultado clustering:", parseError);
-          reject(new Error(`Error parseando resultado clustering: ${parseError.message}`));
+          reject(
+            new Error(
+              `Error parseando resultado clustering: ${parseError.message}`
+            )
+          );
         }
       }
     });
 
     pythonProcess.on("error", (spawnError) => {
       console.error("Error ejecutando Python clustering:", spawnError);
-      reject(new Error(`Error ejecutando Python clustering: ${spawnError.message}`));
+      reject(
+        new Error(`Error ejecutando Python clustering: ${spawnError.message}`)
+      );
     });
 
     // Timeout para clustering
@@ -1125,6 +1153,7 @@ const executePatientClassification = (patientData) => {
 /**
  * Obtiene datos del paciente desde la base de datos para clustering
  */
+
 const getPatientDataForClustering = async (patientId) => {
   return new Promise((resolve, reject) => {
     const query = `
@@ -1147,13 +1176,16 @@ const getPatientDataForClustering = async (patientId) => {
         COUNT(CASE WHEN c.estado = 'Cancelada' THEN 1 END) as citas_canceladas,
         
         -- Tratamientos activos
-        COUNT(CASE WHEN t.estado = 'Activo' THEN 1 END) as tratamientos_activos,
+        COUNT(CASE WHEN c.tratamiento_pendiente = 1 THEN 1 END) as tratamientos_activos,
         
         -- Citas pendientes de pago
         COUNT(CASE WHEN c.estado_pago = 'Pendiente' THEN 1 END) as citas_pendientes_pago,
         
         -- Valor tratamiento promedio
-        COALESCE(AVG(CASE WHEN t.precio_total > 0 THEN t.precio_total END), 0) as valor_tratamiento_promedio,
+        COALESCE(AVG(CASE 
+          WHEN s.tratamiento = 1 AND s.price > 0 THEN s.price 
+          ELSE NULL 
+        END), 0) as valor_tratamiento_promedio,
         
         -- Tasa no-show
         COALESCE(
@@ -1163,19 +1195,43 @@ const getPatientDataForClustering = async (patientId) => {
         
       FROM pacientes p
       LEFT JOIN citas c ON p.id = c.paciente_id AND c.archivado = 0
-      LEFT JOIN tratamientos t ON p.id = t.paciente_id
+      LEFT JOIN servicios s ON c.servicio_id = s.id
       WHERE p.id = ?
       GROUP BY p.id, p.nombre, p.aPaterno, p.aMaterno
     `;
-    
+
     db.query(query, [patientId], (err, results) => {
       if (err) {
         console.error("Error obteniendo datos para clustering:", err);
-        reject(new Error(`Error obteniendo datos del paciente: ${err.message}`));
+        reject(
+          new Error(`Error obteniendo datos del paciente: ${err.message}`)
+        );
       } else if (results.length === 0) {
         reject(new Error("Paciente no encontrado"));
       } else {
-        resolve(results[0]);
+        // CONVERTIR TIPOS DE DATOS AQUÍ TAMBIÉN
+        const result = results[0];
+        const convertedResult = {
+          paciente_id: parseInt(result.paciente_id),
+          nombre: result.nombre,
+          aPaterno: result.aPaterno,
+          aMaterno: result.aMaterno,
+          gasto_total_citas: parseFloat(result.gasto_total_citas) || 0,
+          ticket_promedio: parseFloat(result.ticket_promedio) || 0,
+          precio_maximo: parseFloat(result.precio_maximo) || 0,
+          citas_canceladas: parseInt(result.citas_canceladas) || 0,
+          tratamientos_activos: parseInt(result.tratamientos_activos) || 0,
+          citas_pendientes_pago: parseInt(result.citas_pendientes_pago) || 0,
+          valor_tratamiento_promedio:
+            parseFloat(result.valor_tratamiento_promedio) || 0,
+          tasa_noshow: parseFloat(result.tasa_noshow) || 0,
+        };
+
+        console.log(
+          "DEBUG: Datos convertidos para clustering:",
+          convertedResult
+        );
+        resolve(convertedResult);
       }
     });
   });
@@ -1187,33 +1243,37 @@ const getPatientDataForClustering = async (patientId) => {
 router.post("/classify-patient/:id", async (req, res) => {
   try {
     const patientId = parseInt(req.params.id);
-    
+
     console.log(`=== NUEVA CLASIFICACIÓN DE PACIENTE ${patientId} ===`);
-    
+
     if (!patientId || isNaN(patientId)) {
       return res.status(400).json({
         success: false,
-        error: "ID de paciente inválido"
+        error: "ID de paciente inválido",
       });
     }
-    
+
     // Obtener datos del paciente desde la DB
     const patientData = await getPatientDataForClustering(patientId);
     console.log("Datos obtenidos para clustering:", patientData);
-    
+
     // Ejecutar clasificación
-    const classificationResult = await executePatientClassification(patientData);
-    
+    const classificationResult = await executePatientClassification(
+      patientData
+    );
+
     if (classificationResult.success) {
       console.log("=== CLASIFICACIÓN EXITOSA ===");
       console.log("Segmento:", classificationResult.segmento);
       console.log("Cluster:", classificationResult.cluster);
-      
+
       res.json({
         success: true,
         data: {
           patient_id: patientId,
-          nombre: `${patientData.nombre} ${patientData.aPaterno || ''} ${patientData.aMaterno || ''}`.trim(),
+          nombre: `${patientData.nombre} ${patientData.aPaterno || ""} ${
+            patientData.aMaterno || ""
+          }`.trim(),
           cluster: classificationResult.cluster,
           segmento: classificationResult.segmento,
           confidence: classificationResult.confidence,
@@ -1225,23 +1285,22 @@ router.post("/classify-patient/:id", async (req, res) => {
             tratamientos_activos: patientData.tratamientos_activos,
             citas_pendientes_pago: patientData.citas_pendientes_pago,
             valor_tratamiento_promedio: patientData.valor_tratamiento_promedio,
-            tasa_noshow: patientData.tasa_noshow
-          }
-        }
+            tasa_noshow: patientData.tasa_noshow,
+          },
+        },
       });
     } else {
       res.status(500).json({
         success: false,
         error: "Error en la clasificación de paciente",
-        details: classificationResult.error
+        details: classificationResult.error,
       });
     }
-    
   } catch (error) {
     console.error("Error en classify-patient:", error);
     res.status(500).json({
       success: false,
-      error: `Error interno del servidor: ${error.message}`
+      error: `Error interno del servidor: ${error.message}`,
     });
   }
 });
@@ -1252,87 +1311,97 @@ router.post("/classify-patient/:id", async (req, res) => {
 router.post("/classify-patients-batch", async (req, res) => {
   try {
     const { patient_ids } = req.body;
-    
+
     if (!Array.isArray(patient_ids) || patient_ids.length === 0) {
       return res.status(400).json({
         success: false,
-        error: "Se requiere un array de IDs de pacientes"
+        error: "Se requiere un array de IDs de pacientes",
       });
     }
-    
+
     console.log(`=== CLASIFICACIÓN BATCH: ${patient_ids.length} pacientes ===`);
-    
+
     const results = [];
-    
+
     for (let i = 0; i < patient_ids.length; i++) {
       const patientId = patient_ids[i];
-      console.log(`Procesando paciente ${i + 1}/${patient_ids.length} - ID: ${patientId}`);
-      
+      console.log(
+        `Procesando paciente ${i + 1}/${patient_ids.length} - ID: ${patientId}`
+      );
+
       try {
         const patientData = await getPatientDataForClustering(patientId);
-        const classificationResult = await executePatientClassification(patientData);
-        
+        const classificationResult = await executePatientClassification(
+          patientData
+        );
+
         if (classificationResult.success) {
           results.push({
             patient_id: patientId,
-            nombre: `${patientData.nombre} ${patientData.aPaterno || ''} ${patientData.aMaterno || ''}`.trim(),
+            nombre: `${patientData.nombre} ${patientData.aPaterno || ""} ${
+              patientData.aMaterno || ""
+            }`.trim(),
             success: true,
             cluster: classificationResult.cluster,
             segmento: classificationResult.segmento,
-            confidence: classificationResult.confidence
+            confidence: classificationResult.confidence,
           });
         } else {
           results.push({
             patient_id: patientId,
             success: false,
-            error: classificationResult.error
+            error: classificationResult.error,
           });
         }
-        
+
         // Pausa entre clasificaciones
         if (i < patient_ids.length - 1) {
-          await new Promise(resolve => setTimeout(resolve, 200));
+          await new Promise((resolve) => setTimeout(resolve, 200));
         }
-        
       } catch (error) {
         console.error(`Error procesando paciente ${patientId}:`, error);
         results.push({
           patient_id: patientId,
           success: false,
-          error: error.message
+          error: error.message,
         });
       }
     }
-    
-    const successful = results.filter(r => r.success);
-    const vipCount = successful.filter(r => r.segmento === 'VIP').length;
-    const regularesCount = successful.filter(r => r.segmento === 'REGULARES').length;
-    const problematicosCount = successful.filter(r => r.segmento === 'PROBLEMÁTICOS').length;
-    
+
+    const successful = results.filter((r) => r.success);
+    const vipCount = successful.filter((r) => r.segmento === "VIP").length;
+    const regularesCount = successful.filter(
+      (r) => r.segmento === "REGULARES"
+    ).length;
+    const problematicosCount = successful.filter(
+      (r) => r.segmento === "PROBLEMÁTICOS"
+    ).length;
+
     console.log("=== BATCH CLUSTERING COMPLETADO ===");
     console.log(`Total: ${results.length}, Exitosos: ${successful.length}`);
-    console.log(`VIP: ${vipCount}, Regulares: ${regularesCount}, Problemáticos: ${problematicosCount}`);
-    
+    console.log(
+      `VIP: ${vipCount}, Regulares: ${regularesCount}, Problemáticos: ${problematicosCount}`
+    );
+
     res.json({
       success: true,
       results: results,
       summary: {
         total: results.length,
         successful: successful.length,
-        failed: results.filter(r => !r.success).length,
+        failed: results.filter((r) => !r.success).length,
         segmentos: {
           vip: vipCount,
           regulares: regularesCount,
-          problematicos: problematicosCount
-        }
-      }
+          problematicos: problematicosCount,
+        },
+      },
     });
-    
   } catch (error) {
     console.error("Error en classify-patients-batch:", error);
     res.status(500).json({
       success: false,
-      error: `Error interno del servidor: ${error.message}`
+      error: `Error interno del servidor: ${error.message}`,
     });
   }
 });
@@ -1343,7 +1412,7 @@ router.post("/classify-patients-batch", async (req, res) => {
 router.get("/segmentation-stats", async (req, res) => {
   try {
     console.log("=== OBTENIENDO ESTADÍSTICAS DE SEGMENTACIÓN ===");
-    
+
     // Query para obtener estadísticas básicas de pacientes
     const statsQuery = `
       SELECT 
@@ -1356,42 +1425,43 @@ router.get("/segmentation-stats", async (req, res) => {
       LEFT JOIN citas c ON p.id = c.paciente_id AND c.archivado = 0
       WHERE p.estado != 'Eliminado'
     `;
-    
+
     db.query(statsQuery, [], (err, results) => {
       if (err) {
         console.error("Error obteniendo estadísticas:", err);
         return res.status(500).json({
           success: false,
-          error: "Error obteniendo estadísticas de segmentación"
+          error: "Error obteniendo estadísticas de segmentación",
         });
       }
-      
+
       const stats = results[0];
-      
+
       res.json({
         success: true,
         estadisticas: {
           total_pacientes: stats.total_pacientes || 0,
           pacientes_activos: stats.pacientes_activos || 0,
-          ticket_promedio_general: parseFloat(stats.ticket_promedio_general) || 0,
+          ticket_promedio_general:
+            parseFloat(stats.ticket_promedio_general) || 0,
           ingresos_totales: parseFloat(stats.ingresos_totales) || 0,
           total_citas: stats.total_citas || 0,
           // Estas se actualizarían conforme se vayan clasificando pacientes
           segmentos_estimados: {
             vip: "Por clasificar",
-            regulares: "Por clasificar", 
-            problematicos: "Por clasificar"
-          }
+            regulares: "Por clasificar",
+            problematicos: "Por clasificar",
+          },
         },
-        mensaje: "Usa los endpoints de clasificación para obtener segmentación específica"
+        mensaje:
+          "Usa los endpoints de clasificación para obtener segmentación específica",
       });
     });
-    
   } catch (error) {
     console.error("Error en segmentation-stats:", error);
     res.status(500).json({
       success: false,
-      error: `Error interno del servidor: ${error.message}`
+      error: `Error interno del servidor: ${error.message}`,
     });
   }
 });
@@ -1409,29 +1479,30 @@ router.get("/clustering-model-info", (req, res) => {
       n_clusters: 3,
       segmentos: {
         0: "VIP - Clientes de alto valor",
-        1: "REGULARES - Clientes con comportamiento estándar", 
-        2: "PROBLEMÁTICOS - Clientes que requieren atención especial"
+        1: "REGULARES - Clientes con comportamiento estándar",
+        2: "PROBLEMÁTICOS - Clientes que requieren atención especial",
       },
       features_utilizadas: [
         "gasto_total_citas",
         "ticket_promedio",
-        "precio_maximo", 
+        "precio_maximo",
         "citas_canceladas",
         "tratamientos_activos",
         "citas_pendientes_pago",
         "valor_tratamiento_promedio",
-        "tasa_noshow"
+        "tasa_noshow",
       ],
       preprocessing: "StandardScaler + Log transformation",
       available: true,
-      description: "Modelo K-Means para segmentación de pacientes basado en comportamiento financiero y asistencia"
+      description:
+        "Modelo K-Means para segmentación de pacientes basado en comportamiento financiero y asistencia",
     },
     endpoints: {
       classify_single: "POST /api/ml/classify-patient/:id",
-      classify_batch: "POST /api/ml/classify-patients-batch", 
+      classify_batch: "POST /api/ml/classify-patients-batch",
       segmentation_stats: "GET /api/ml/segmentation-stats",
-      clustering_model_info: "GET /api/ml/clustering-model-info"
-    }
+      clustering_model_info: "GET /api/ml/clustering-model-info",
+    },
   });
 });
 
@@ -1448,11 +1519,20 @@ router.post("/patients-segmentation", async (req, res) => {
       gasto_min = 0,
       gasto_max = 999999,
       limit = 100,
-      search = ''
+      search = "",
     } = req.body;
 
     console.log("=== SEGMENTACIÓN DINÁMICA DE PACIENTES ===");
-    console.log("Filtros:", { edad_min, edad_max, ubicaciones, servicios, gasto_min, gasto_max, limit, search });
+    console.log("Filtros:", {
+      edad_min,
+      edad_max,
+      ubicaciones,
+      servicios,
+      gasto_min,
+      gasto_max,
+      limit,
+      search,
+    });
 
     // Construir query dinámico con filtros
     let whereConditions = ['p.estado != "Eliminado"'];
@@ -1468,14 +1548,14 @@ router.post("/patients-segmentation", async (req, res) => {
 
     // Filtro por ubicaciones
     if (ubicaciones.length > 0) {
-      const placeholders = ubicaciones.map(() => '?').join(',');
+      const placeholders = ubicaciones.map(() => "?").join(",");
       whereConditions.push(`p.lugar IN (${placeholders})`);
       queryParams.push(...ubicaciones);
     }
 
     // Filtro por servicios utilizados
     if (servicios.length > 0) {
-      const placeholders = servicios.map(() => '?').join(',');
+      const placeholders = servicios.map(() => "?").join(",");
       whereConditions.push(`EXISTS (
         SELECT 1 FROM citas c2 
         WHERE c2.paciente_id = p.id 
@@ -1496,7 +1576,7 @@ router.post("/patients-segmentation", async (req, res) => {
       queryParams.push(searchTerm, searchTerm, searchTerm);
     }
 
-    const whereClause = whereConditions.join(' AND ');
+    const whereClause = whereConditions.join(" AND ");
 
     // Query corregida usando SOLO los campos que existen en tu BDD
     const query = `
@@ -1575,7 +1655,7 @@ router.post("/patients-segmentation", async (req, res) => {
         return res.status(500).json({
           success: false,
           error: "Error obteniendo pacientes de la base de datos",
-          details: err.message
+          details: err.message,
         });
       }
 
@@ -1587,56 +1667,81 @@ router.post("/patients-segmentation", async (req, res) => {
 
       for (const patient of results) {
         try {
-          // Preparar datos para clustering usando los campos corregidos
+          // Preparar datos para clustering CONVIRTIENDO STRINGS A NÚMEROS
           const clusteringData = {
-            gasto_total_citas: patient.gasto_total_citas || 0,
-            ticket_promedio: patient.ticket_promedio || 0,
-            precio_maximo: patient.precio_maximo || 0,
-            citas_canceladas: patient.citas_canceladas || 0,
-            tratamientos_activos: patient.tratamientos_activos || 0,
-            citas_pendientes_pago: patient.citas_pendientes_pago || 0,
-            valor_tratamiento_promedio: patient.valor_tratamiento_promedio || 0,
-            tasa_noshow: patient.tasa_noshow || 0
+            gasto_total_citas: parseFloat(patient.gasto_total_citas) || 0,
+            ticket_promedio: parseFloat(patient.ticket_promedio) || 0,
+            precio_maximo: parseFloat(patient.precio_maximo) || 0,
+            citas_canceladas: parseInt(patient.citas_canceladas) || 0,
+            tratamientos_activos: parseInt(patient.tratamientos_activos) || 0,
+            citas_pendientes_pago: parseInt(patient.citas_pendientes_pago) || 0,
+            valor_tratamiento_promedio:
+              parseFloat(patient.valor_tratamiento_promedio) || 0,
+            tasa_noshow: parseFloat(patient.tasa_noshow) || 0,
           };
 
-          console.log(`Clasificando paciente ${patient.paciente_id}:`, clusteringData);
+          console.log(
+            `Clasificando paciente ${patient.paciente_id}:`,
+            clusteringData
+          );
 
           // Llamar al script de clustering
-          const classificationResult = await executePatientClassification(clusteringData);
+          const classificationResult = await executePatientClassification(
+            clusteringData
+          );
 
           if (classificationResult.success) {
             const patientWithSegment = {
               ...patient,
+              // También convertir campos numéricos del paciente para el frontend
+              gasto_total_citas: parseFloat(patient.gasto_total_citas) || 0,
+              ticket_promedio: parseFloat(patient.ticket_promedio) || 0,
+              precio_maximo: parseFloat(patient.precio_maximo) || 0,
+              edad: parseInt(patient.edad) || 0,
+              total_citas: parseInt(patient.total_citas) || 0,
+              citas_canceladas: parseInt(patient.citas_canceladas) || 0,
               cluster: classificationResult.cluster,
               segmento: classificationResult.segmento,
               confidence: classificationResult.confidence,
-              clasificacion_exitosa: true
+              clasificacion_exitosa: true,
             };
-            
+
             patientsWithSegments.push(patientWithSegment);
             segmentStats[classificationResult.segmento]++;
           } else {
             // Si falla el clustering, agregar sin segmento
             patientsWithSegments.push({
               ...patient,
+              // Convertir campos numéricos aunque falle el clustering
+              gasto_total_citas: parseFloat(patient.gasto_total_citas) || 0,
+              ticket_promedio: parseFloat(patient.ticket_promedio) || 0,
+              precio_maximo: parseFloat(patient.precio_maximo) || 0,
+              edad: parseInt(patient.edad) || 0,
+              total_citas: parseInt(patient.total_citas) || 0,
               cluster: null,
-              segmento: 'NO_CLASIFICADO',
+              segmento: "NO_CLASIFICADO",
               confidence: 0,
               clasificacion_exitosa: false,
-              error_clasificacion: classificationResult.error
+              error_clasificacion: classificationResult.error,
             });
             segmentStats.ERRORES++;
           }
-
         } catch (clusterError) {
-          console.error(`Error clasificando paciente ${patient.paciente_id}:`, clusterError);
+          console.error(
+            `Error clasificando paciente ${patient.paciente_id}:`,
+            clusterError
+          );
           patientsWithSegments.push({
             ...patient,
+            // Convertir campos numéricos aunque haya error
+            gasto_total_citas: parseFloat(patient.gasto_total_citas) || 0,
+            ticket_promedio: parseFloat(patient.ticket_promedio) || 0,
+            edad: parseInt(patient.edad) || 0,
             cluster: null,
-            segmento: 'ERROR',
+            segmento: "ERROR",
             confidence: 0,
             clasificacion_exitosa: false,
-            error_clasificacion: clusterError.message
+            error_clasificacion: clusterError.message,
           });
           segmentStats.ERRORES++;
         }
@@ -1644,22 +1749,28 @@ router.post("/patients-segmentation", async (req, res) => {
 
       // Calcular estadísticas adicionales
       const totalPacientes = patientsWithSegments.length;
-      const gastoPromedio = totalPacientes > 0 
-        ? patientsWithSegments.reduce((sum, p) => sum + (p.gasto_total_citas || 0), 0) / totalPacientes 
-        : 0;
-      const edadPromedio = totalPacientes > 0 
-        ? patientsWithSegments.reduce((sum, p) => sum + (p.edad || 0), 0) / totalPacientes 
-        : 0;
+      const gastoPromedio =
+        totalPacientes > 0
+          ? patientsWithSegments.reduce(
+              (sum, p) => sum + (p.gasto_total_citas || 0),
+              0
+            ) / totalPacientes
+          : 0;
+      const edadPromedio =
+        totalPacientes > 0
+          ? patientsWithSegments.reduce((sum, p) => sum + (p.edad || 0), 0) /
+            totalPacientes
+          : 0;
 
       // Estadísticas por ubicación
       const ubicacionStats = {};
-      patientsWithSegments.forEach(p => {
-        const lugar = p.lugar || 'Sin especificar';
+      patientsWithSegments.forEach((p) => {
+        const lugar = p.lugar || "Sin especificar";
         if (!ubicacionStats[lugar]) {
           ubicacionStats[lugar] = { count: 0, gasto_total: 0 };
         }
         ubicacionStats[lugar].count++;
-        ubicacionStats[lugar].gasto_total += (p.gasto_total_citas || 0);
+        ubicacionStats[lugar].gasto_total += p.gasto_total_citas || 0;
       });
 
       console.log("=== SEGMENTACIÓN COMPLETADA ===");
@@ -1676,19 +1787,23 @@ router.post("/patients-segmentation", async (req, res) => {
             edad_promedio: edadPromedio,
             ubicaciones: ubicacionStats,
             filtros_aplicados: {
-              edad_min, edad_max, ubicaciones, servicios, 
-              gasto_min, gasto_max, search
-            }
-          }
-        }
+              edad_min,
+              edad_max,
+              ubicaciones,
+              servicios,
+              gasto_min,
+              gasto_max,
+              search,
+            },
+          },
+        },
       });
     });
-
   } catch (error) {
     console.error("Error en patients-segmentation:", error);
     res.status(500).json({
       success: false,
-      error: `Error interno del servidor: ${error.message}`
+      error: `Error interno del servidor: ${error.message}`,
     });
   }
 });
@@ -1763,51 +1878,60 @@ router.get("/filter-options", async (req, res) => {
       new Promise((resolve, reject) => {
         db.query(rangosQuery, (err, results) => {
           if (err) reject(err);
-          else resolve(results[0] || { edad_min: 18, edad_max: 80, total_pacientes: 0 });
+          else
+            resolve(
+              results[0] || { edad_min: 18, edad_max: 80, total_pacientes: 0 }
+            );
         });
       }),
       new Promise((resolve, reject) => {
         db.query(gastosQuery, (err, results) => {
           if (err) reject(err);
-          else resolve(results[0] || { gasto_min: 0, gasto_max: 10000, gasto_promedio: 0 });
+          else
+            resolve(
+              results[0] || {
+                gasto_min: 0,
+                gasto_max: 10000,
+                gasto_promedio: 0,
+              }
+            );
         });
-      })
+      }),
     ]);
 
     res.json({
       success: true,
       options: {
-        ubicaciones: ubicaciones.map(u => ({
+        ubicaciones: ubicaciones.map((u) => ({
           value: u.ubicacion,
           label: `${u.ubicacion} (${u.count})`,
-          count: u.count
+          count: u.count,
         })),
-        servicios: servicios.map(s => ({
+        servicios: servicios.map((s) => ({
           value: s.id,
           label: s.title,
           category: s.category,
-          uso_count: s.uso_count
+          uso_count: s.uso_count,
         })),
         rangos: {
           edad: {
             min: rangos.edad_min || 18,
-            max: rangos.edad_max || 80
+            max: rangos.edad_max || 80,
           },
           gastos: {
             min: 0,
             max: Math.ceil((gastos.gasto_max || 10000) * 1.1), // 10% extra para el slider
-            promedio: gastos.gasto_promedio || 0
-          }
+            promedio: gastos.gasto_promedio || 0,
+          },
         },
-        total_pacientes: rangos.total_pacientes || 0
-      }
+        total_pacientes: rangos.total_pacientes || 0,
+      },
     });
-
   } catch (error) {
     console.error("Error obteniendo opciones de filtros:", error);
     res.status(500).json({
       success: false,
-      error: `Error obteniendo opciones: ${error.message}`
+      error: `Error obteniendo opciones: ${error.message}`,
     });
   }
 });
