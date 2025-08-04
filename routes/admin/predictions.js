@@ -454,46 +454,63 @@ router.post("/debug-features", async (req, res) => {
 router.get("/model-info", (req, res) => {
   res.json({
     success: true,
-    model_info: {
-      name: "No-Show Predictor RandomForest",
-      type: "RandomForestClassifier",
-      version: "1.0.1",
-      output_type: "binary_classification_with_probability",
-      classes: {
-        0: "Asistirá a la cita",
-        1: "No asistirá (No-Show)",
+    models: {
+      no_show_predictor: {
+        name: "No-Show Predictor RandomForest",
+        type: "RandomForestClassifier", 
+        version: "1.0.1",
+        output_type: "binary_classification_with_probability",
+        classes: {
+          0: "Asistirá a la cita",
+          1: "No asistirá (No-Show)"
+        },
+        probability: "Devuelve probabilidad de no-show (0.0 a 1.0)",
+        features: [
+          "edad", "genero", "alergias_flag", "lead_time_days", "dow", "hour",
+          "is_weekend", "categoria_servicio", "precio_servicio", "duration_min",
+          "paid_flag", "tratamiento_pendiente", "total_citas", "total_no_shows",
+          "pct_no_show_historico", "dias_desde_ultima_cita"
+        ],
+        available: true,
+        description: "Modelo RandomForest para predecir inasistencias con protección contra data leakage"
       },
-      probability: "Devuelve probabilidad de no-show (0.0 a 1.0)",
-      features: [
-        "edad",
-        "genero",
-        "alergias_flag",
-        "lead_time_days",
-        "dow",
-        "hour",
-        "is_weekend",
-        "categoria_servicio",
-        "precio_servicio",
-        "duration_min",
-        "paid_flag",
-        "tratamiento_pendiente",
-        "total_citas",
-        "total_no_shows",
-        "pct_no_show_historico",
-        "dias_desde_ultima_cita",
-      ],
-      available: true,
-      data_leakage_protection: true,
-      description:
-        "Modelo RandomForest entrenado para predecir inasistencias con protección contra data leakage",
+      patient_clustering: {
+        name: "Patient Segmentation K-Means",
+        type: "KMeans",
+        version: "1.0.0", 
+        n_clusters: 3,
+        segmentos: {
+          0: "VIP - Clientes de alto valor",
+          1: "REGULARES - Clientes con comportamiento estándar",
+          2: "PROBLEMÁTICOS - Clientes que requieren atención especial"
+        },
+        features: [
+          "gasto_total_citas", "ticket_promedio", "precio_maximo",
+          "citas_canceladas", "tratamientos_activos", "citas_pendientes_pago", 
+          "valor_tratamiento_promedio", "tasa_noshow"
+        ],
+        preprocessing: "StandardScaler + Log transformation",
+        available: true,
+        description: "Modelo K-Means para segmentación de pacientes basado en comportamiento"
+      }
     },
     endpoints: {
-      predict_single: "POST /api/ml/predict-no-show",
+      // No-Show Prediction
+      predict_no_show: "POST /api/ml/predict-no-show",
       predict_batch: "POST /api/ml/predict-batch",
       debug_features: "POST /api/ml/debug-features",
+      
+      // Patient Clustering  
+      classify_patient: "POST /api/ml/classify-patient/:id",
+      classify_batch: "POST /api/ml/classify-patients-batch",
+      segmentation_stats: "GET /api/ml/segmentation-stats",
+      clustering_model_info: "GET /api/ml/clustering-model-info",
+      
+      // General
       model_info: "GET /api/ml/model-info",
       health: "GET /api/ml/health",
-    },
+      cita_detalles: "GET /api/ml/cita-detalles/:citaId"
+    }
   });
 });
 
@@ -1038,6 +1055,384 @@ router.post("/send-reminder", async (req, res) => {
       error: `Error interno del servidor: ${error.message}`,
     });
   }
+});
+
+
+
+/**
+ * Ejecuta el script de Python para clasificación de pacientes (clustering)
+ */
+const executePatientClassification = (patientData) => {
+  return new Promise((resolve, reject) => {
+    const scriptPath = path.join(__dirname, "../../models/classify_patient.py");
+    
+    console.log("=== LLAMANDO CLUSTERING SCRIPT ===");
+    console.log("Script:", scriptPath);
+    console.log("Datos enviados:", JSON.stringify(patientData, null, 2));
+
+    const pythonCommand = process.platform === "win32" ? "python" : "python3";
+    const pythonProcess = spawn(pythonCommand, [scriptPath, JSON.stringify(patientData)]);
+
+    let result = "";
+    let error = "";
+
+    pythonProcess.stdout.on("data", (data) => {
+      result += data.toString();
+    });
+
+    pythonProcess.stderr.on("data", (data) => {
+      error += data.toString();
+      console.error("Python clustering stderr:", data.toString());
+    });
+
+    pythonProcess.on("close", (code) => {
+      console.log(`Proceso Python clustering terminó con código: ${code}`);
+      console.log("Resultado clustering raw:", result);
+
+      if (code !== 0) {
+        console.error("Error Python clustering completo:", error);
+        reject(new Error(`Script Python clustering falló (código ${code}): ${error}`));
+      } else {
+        try {
+          const parsedResult = JSON.parse(result.trim());
+          console.log("Resultado clustering parseado:", parsedResult);
+          resolve(parsedResult);
+        } catch (parseError) {
+          console.error("Error parseando resultado clustering:", parseError);
+          reject(new Error(`Error parseando resultado clustering: ${parseError.message}`));
+        }
+      }
+    });
+
+    pythonProcess.on("error", (spawnError) => {
+      console.error("Error ejecutando Python clustering:", spawnError);
+      reject(new Error(`Error ejecutando Python clustering: ${spawnError.message}`));
+    });
+
+    // Timeout para clustering
+    const timeout = setTimeout(() => {
+      console.log("Timeout en clustering - matando proceso");
+      pythonProcess.kill("SIGKILL");
+      reject(new Error("Timeout en clustering (30s)"));
+    }, 30000);
+
+    pythonProcess.on("close", () => {
+      clearTimeout(timeout);
+    });
+  });
+};
+
+/**
+ * Obtiene datos del paciente desde la base de datos para clustering
+ */
+const getPatientDataForClustering = async (patientId) => {
+  return new Promise((resolve, reject) => {
+    const query = `
+      SELECT 
+        p.id as paciente_id,
+        p.nombre,
+        p.aPaterno,
+        p.aMaterno,
+        
+        -- Gasto total en citas
+        COALESCE(SUM(c.precio_servicio), 0) as gasto_total_citas,
+        
+        -- Ticket promedio
+        COALESCE(AVG(CASE WHEN c.precio_servicio > 0 THEN c.precio_servicio END), 0) as ticket_promedio,
+        
+        -- Precio máximo
+        COALESCE(MAX(c.precio_servicio), 0) as precio_maximo,
+        
+        -- Citas canceladas
+        COUNT(CASE WHEN c.estado = 'Cancelada' THEN 1 END) as citas_canceladas,
+        
+        -- Tratamientos activos
+        COUNT(CASE WHEN t.estado = 'Activo' THEN 1 END) as tratamientos_activos,
+        
+        -- Citas pendientes de pago
+        COUNT(CASE WHEN c.estado_pago = 'Pendiente' THEN 1 END) as citas_pendientes_pago,
+        
+        -- Valor tratamiento promedio
+        COALESCE(AVG(CASE WHEN t.precio_total > 0 THEN t.precio_total END), 0) as valor_tratamiento_promedio,
+        
+        -- Tasa no-show
+        COALESCE(
+          COUNT(CASE WHEN c.estado IN ('Cancelada', 'No llegó') THEN 1 END) / NULLIF(COUNT(c.id), 0), 
+          0
+        ) as tasa_noshow
+        
+      FROM pacientes p
+      LEFT JOIN citas c ON p.id = c.paciente_id AND c.archivado = 0
+      LEFT JOIN tratamientos t ON p.id = t.paciente_id
+      WHERE p.id = ?
+      GROUP BY p.id, p.nombre, p.aPaterno, p.aMaterno
+    `;
+    
+    db.query(query, [patientId], (err, results) => {
+      if (err) {
+        console.error("Error obteniendo datos para clustering:", err);
+        reject(new Error(`Error obteniendo datos del paciente: ${err.message}`));
+      } else if (results.length === 0) {
+        reject(new Error("Paciente no encontrado"));
+      } else {
+        resolve(results[0]);
+      }
+    });
+  });
+};
+
+/**
+ * NUEVO ENDPOINT: Clasificar un paciente específico en su segmento
+ */
+router.post("/classify-patient/:id", async (req, res) => {
+  try {
+    const patientId = parseInt(req.params.id);
+    
+    console.log(`=== NUEVA CLASIFICACIÓN DE PACIENTE ${patientId} ===`);
+    
+    if (!patientId || isNaN(patientId)) {
+      return res.status(400).json({
+        success: false,
+        error: "ID de paciente inválido"
+      });
+    }
+    
+    // Obtener datos del paciente desde la DB
+    const patientData = await getPatientDataForClustering(patientId);
+    console.log("Datos obtenidos para clustering:", patientData);
+    
+    // Ejecutar clasificación
+    const classificationResult = await executePatientClassification(patientData);
+    
+    if (classificationResult.success) {
+      console.log("=== CLASIFICACIÓN EXITOSA ===");
+      console.log("Segmento:", classificationResult.segmento);
+      console.log("Cluster:", classificationResult.cluster);
+      
+      res.json({
+        success: true,
+        data: {
+          patient_id: patientId,
+          nombre: `${patientData.nombre} ${patientData.aPaterno || ''} ${patientData.aMaterno || ''}`.trim(),
+          cluster: classificationResult.cluster,
+          segmento: classificationResult.segmento,
+          confidence: classificationResult.confidence,
+          datos_utilizados: {
+            gasto_total_citas: patientData.gasto_total_citas,
+            ticket_promedio: patientData.ticket_promedio,
+            precio_maximo: patientData.precio_maximo,
+            citas_canceladas: patientData.citas_canceladas,
+            tratamientos_activos: patientData.tratamientos_activos,
+            citas_pendientes_pago: patientData.citas_pendientes_pago,
+            valor_tratamiento_promedio: patientData.valor_tratamiento_promedio,
+            tasa_noshow: patientData.tasa_noshow
+          }
+        }
+      });
+    } else {
+      res.status(500).json({
+        success: false,
+        error: "Error en la clasificación de paciente",
+        details: classificationResult.error
+      });
+    }
+    
+  } catch (error) {
+    console.error("Error en classify-patient:", error);
+    res.status(500).json({
+      success: false,
+      error: `Error interno del servidor: ${error.message}`
+    });
+  }
+});
+
+/**
+ * NUEVO ENDPOINT: Clasificar múltiples pacientes (batch clustering)
+ */
+router.post("/classify-patients-batch", async (req, res) => {
+  try {
+    const { patient_ids } = req.body;
+    
+    if (!Array.isArray(patient_ids) || patient_ids.length === 0) {
+      return res.status(400).json({
+        success: false,
+        error: "Se requiere un array de IDs de pacientes"
+      });
+    }
+    
+    console.log(`=== CLASIFICACIÓN BATCH: ${patient_ids.length} pacientes ===`);
+    
+    const results = [];
+    
+    for (let i = 0; i < patient_ids.length; i++) {
+      const patientId = patient_ids[i];
+      console.log(`Procesando paciente ${i + 1}/${patient_ids.length} - ID: ${patientId}`);
+      
+      try {
+        const patientData = await getPatientDataForClustering(patientId);
+        const classificationResult = await executePatientClassification(patientData);
+        
+        if (classificationResult.success) {
+          results.push({
+            patient_id: patientId,
+            nombre: `${patientData.nombre} ${patientData.aPaterno || ''} ${patientData.aMaterno || ''}`.trim(),
+            success: true,
+            cluster: classificationResult.cluster,
+            segmento: classificationResult.segmento,
+            confidence: classificationResult.confidence
+          });
+        } else {
+          results.push({
+            patient_id: patientId,
+            success: false,
+            error: classificationResult.error
+          });
+        }
+        
+        // Pausa entre clasificaciones
+        if (i < patient_ids.length - 1) {
+          await new Promise(resolve => setTimeout(resolve, 200));
+        }
+        
+      } catch (error) {
+        console.error(`Error procesando paciente ${patientId}:`, error);
+        results.push({
+          patient_id: patientId,
+          success: false,
+          error: error.message
+        });
+      }
+    }
+    
+    const successful = results.filter(r => r.success);
+    const vipCount = successful.filter(r => r.segmento === 'VIP').length;
+    const regularesCount = successful.filter(r => r.segmento === 'REGULARES').length;
+    const problematicosCount = successful.filter(r => r.segmento === 'PROBLEMÁTICOS').length;
+    
+    console.log("=== BATCH CLUSTERING COMPLETADO ===");
+    console.log(`Total: ${results.length}, Exitosos: ${successful.length}`);
+    console.log(`VIP: ${vipCount}, Regulares: ${regularesCount}, Problemáticos: ${problematicosCount}`);
+    
+    res.json({
+      success: true,
+      results: results,
+      summary: {
+        total: results.length,
+        successful: successful.length,
+        failed: results.filter(r => !r.success).length,
+        segmentos: {
+          vip: vipCount,
+          regulares: regularesCount,
+          problematicos: problematicosCount
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error("Error en classify-patients-batch:", error);
+    res.status(500).json({
+      success: false,
+      error: `Error interno del servidor: ${error.message}`
+    });
+  }
+});
+
+/**
+ * NUEVO ENDPOINT: Obtener estadísticas de segmentación
+ */
+router.get("/segmentation-stats", async (req, res) => {
+  try {
+    console.log("=== OBTENIENDO ESTADÍSTICAS DE SEGMENTACIÓN ===");
+    
+    // Query para obtener estadísticas básicas de pacientes
+    const statsQuery = `
+      SELECT 
+        COUNT(*) as total_pacientes,
+        COUNT(CASE WHEN p.estado = 'Activo' THEN 1 END) as pacientes_activos,
+        AVG(CASE WHEN c.precio_servicio > 0 THEN c.precio_servicio END) as ticket_promedio_general,
+        SUM(c.precio_servicio) as ingresos_totales,
+        COUNT(DISTINCT c.id) as total_citas
+      FROM pacientes p
+      LEFT JOIN citas c ON p.id = c.paciente_id AND c.archivado = 0
+      WHERE p.estado != 'Eliminado'
+    `;
+    
+    db.query(statsQuery, [], (err, results) => {
+      if (err) {
+        console.error("Error obteniendo estadísticas:", err);
+        return res.status(500).json({
+          success: false,
+          error: "Error obteniendo estadísticas de segmentación"
+        });
+      }
+      
+      const stats = results[0];
+      
+      res.json({
+        success: true,
+        estadisticas: {
+          total_pacientes: stats.total_pacientes || 0,
+          pacientes_activos: stats.pacientes_activos || 0,
+          ticket_promedio_general: parseFloat(stats.ticket_promedio_general) || 0,
+          ingresos_totales: parseFloat(stats.ingresos_totales) || 0,
+          total_citas: stats.total_citas || 0,
+          // Estas se actualizarían conforme se vayan clasificando pacientes
+          segmentos_estimados: {
+            vip: "Por clasificar",
+            regulares: "Por clasificar", 
+            problematicos: "Por clasificar"
+          }
+        },
+        mensaje: "Usa los endpoints de clasificación para obtener segmentación específica"
+      });
+    });
+    
+  } catch (error) {
+    console.error("Error en segmentation-stats:", error);
+    res.status(500).json({
+      success: false,
+      error: `Error interno del servidor: ${error.message}`
+    });
+  }
+});
+
+/**
+ * NUEVO ENDPOINT: Información del modelo de clustering
+ */
+router.get("/clustering-model-info", (req, res) => {
+  res.json({
+    success: true,
+    model_info: {
+      name: "Patient Segmentation K-Means Clustering",
+      type: "KMeans",
+      version: "1.0.0",
+      n_clusters: 3,
+      segmentos: {
+        0: "VIP - Clientes de alto valor",
+        1: "REGULARES - Clientes con comportamiento estándar", 
+        2: "PROBLEMÁTICOS - Clientes que requieren atención especial"
+      },
+      features_utilizadas: [
+        "gasto_total_citas",
+        "ticket_promedio",
+        "precio_maximo", 
+        "citas_canceladas",
+        "tratamientos_activos",
+        "citas_pendientes_pago",
+        "valor_tratamiento_promedio",
+        "tasa_noshow"
+      ],
+      preprocessing: "StandardScaler + Log transformation",
+      available: true,
+      description: "Modelo K-Means para segmentación de pacientes basado en comportamiento financiero y asistencia"
+    },
+    endpoints: {
+      classify_single: "POST /api/ml/classify-patient/:id",
+      classify_batch: "POST /api/ml/classify-patients-batch", 
+      segmentation_stats: "GET /api/ml/segmentation-stats",
+      clustering_model_info: "GET /api/ml/clustering-model-info"
+    }
+  });
 });
 
 module.exports = router;
