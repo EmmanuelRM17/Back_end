@@ -1436,7 +1436,7 @@ router.get("/clustering-model-info", (req, res) => {
 });
 
 /**
- * NUEVO ENDPOINT: Obtener pacientes con filtros y segmentación automática
+ * ENDPOINT CORREGIDO: Obtener pacientes con filtros y segmentación automática
  */
 router.post("/patients-segmentation", async (req, res) => {
   try {
@@ -1473,6 +1473,18 @@ router.post("/patients-segmentation", async (req, res) => {
       queryParams.push(...ubicaciones);
     }
 
+    // Filtro por servicios utilizados
+    if (servicios.length > 0) {
+      const placeholders = servicios.map(() => '?').join(',');
+      whereConditions.push(`EXISTS (
+        SELECT 1 FROM citas c2 
+        WHERE c2.paciente_id = p.id 
+        AND c2.servicio_id IN (${placeholders})
+        AND c2.archivado = 0
+      )`);
+      queryParams.push(...servicios);
+    }
+
     // Filtro por búsqueda de nombre
     if (search.trim()) {
       whereConditions.push(`
@@ -1486,6 +1498,7 @@ router.post("/patients-segmentation", async (req, res) => {
 
     const whereClause = whereConditions.join(' AND ');
 
+    // Query corregida usando SOLO los campos que existen en tu BDD
     const query = `
       SELECT 
         p.id as paciente_id,
@@ -1500,6 +1513,7 @@ router.post("/patients-segmentation", async (req, res) => {
         p.telefono,
         p.email,
         p.alergias,
+        p.condiciones_medicas,
         p.estado as estado_paciente,
         p.fecha_creacion,
         
@@ -1512,9 +1526,15 @@ router.post("/patients-segmentation", async (req, res) => {
         COUNT(CASE WHEN c.estado = 'Completada' THEN 1 END) as citas_completadas,
         COUNT(CASE WHEN c.estado_pago = 'Pendiente' THEN 1 END) as citas_pendientes_pago,
         
-        -- Datos de tratamientos
-        COUNT(CASE WHEN t.estado = 'Activo' THEN 1 END) as tratamientos_activos,
-        COALESCE(AVG(CASE WHEN t.precio_total > 0 THEN t.precio_total END), 0) as valor_tratamiento_promedio,
+        -- Datos de tratamientos (usando campos que SÍ existen)
+        COUNT(CASE WHEN c.tratamiento_pendiente = 1 THEN 1 END) as tratamientos_activos,
+        COUNT(CASE WHEN c.tratamiento_id IS NOT NULL THEN 1 END) as total_tratamientos,
+        
+        -- Valor promedio basado en servicios de tratamiento
+        COALESCE(AVG(CASE 
+          WHEN s.tratamiento = 1 AND s.price > 0 THEN s.price 
+          ELSE NULL 
+        END), 0) as valor_tratamiento_promedio,
         
         -- Tasa no-show y última cita
         COALESCE(
@@ -1526,15 +1546,22 @@ router.post("/patients-segmentation", async (req, res) => {
         
         -- Servicios únicos utilizados
         COUNT(DISTINCT c.servicio_id) as servicios_unicos,
-        GROUP_CONCAT(DISTINCT s.category ORDER BY s.category) as categorias_servicios
+        GROUP_CONCAT(DISTINCT s.category ORDER BY s.category) as categorias_servicios,
+        
+        -- Datos adicionales de pagos
+        COALESCE(SUM(pg.monto), 0) as monto_total_pagado,
+        COUNT(DISTINCT pg.id) as total_transacciones,
+        COALESCE(AVG(pg.monto), 0) as ticket_pago_promedio,
+        COUNT(CASE WHEN pg.estado = 'Completado' THEN 1 END) as pagos_exitosos
         
       FROM pacientes p
       LEFT JOIN citas c ON p.id = c.paciente_id AND c.archivado = 0
-      LEFT JOIN tratamientos t ON p.id = t.paciente_id
       LEFT JOIN servicios s ON c.servicio_id = s.id
+      LEFT JOIN pagos pg ON p.id = pg.paciente_id
       WHERE ${whereClause}
       GROUP BY p.id, p.nombre, p.aPaterno, p.aMaterno, p.fechaNacimiento, 
-               p.genero, p.lugar, p.telefono, p.email, p.alergias, p.estado, p.fecha_creacion
+               p.genero, p.lugar, p.telefono, p.email, p.alergias, p.condiciones_medicas, 
+               p.estado, p.fecha_creacion
       HAVING gasto_total_citas BETWEEN ? AND ?
       ORDER BY gasto_total_citas DESC, total_citas DESC
       LIMIT ?
@@ -1547,7 +1574,8 @@ router.post("/patients-segmentation", async (req, res) => {
         console.error("Error en query de segmentación:", err);
         return res.status(500).json({
           success: false,
-          error: "Error obteniendo pacientes de la base de datos"
+          error: "Error obteniendo pacientes de la base de datos",
+          details: err.message
         });
       }
 
@@ -1559,17 +1587,19 @@ router.post("/patients-segmentation", async (req, res) => {
 
       for (const patient of results) {
         try {
-          // Preparar datos para clustering
+          // Preparar datos para clustering usando los campos corregidos
           const clusteringData = {
-            gasto_total_citas: patient.gasto_total_citas,
-            ticket_promedio: patient.ticket_promedio,
-            precio_maximo: patient.precio_maximo,
-            citas_canceladas: patient.citas_canceladas,
-            tratamientos_activos: patient.tratamientos_activos,
-            citas_pendientes_pago: patient.citas_pendientes_pago,
-            valor_tratamiento_promedio: patient.valor_tratamiento_promedio,
-            tasa_noshow: patient.tasa_noshow
+            gasto_total_citas: patient.gasto_total_citas || 0,
+            ticket_promedio: patient.ticket_promedio || 0,
+            precio_maximo: patient.precio_maximo || 0,
+            citas_canceladas: patient.citas_canceladas || 0,
+            tratamientos_activos: patient.tratamientos_activos || 0,
+            citas_pendientes_pago: patient.citas_pendientes_pago || 0,
+            valor_tratamiento_promedio: patient.valor_tratamiento_promedio || 0,
+            tasa_noshow: patient.tasa_noshow || 0
           };
+
+          console.log(`Clasificando paciente ${patient.paciente_id}:`, clusteringData);
 
           // Llamar al script de clustering
           const classificationResult = await executePatientClassification(clusteringData);
@@ -1615,20 +1645,21 @@ router.post("/patients-segmentation", async (req, res) => {
       // Calcular estadísticas adicionales
       const totalPacientes = patientsWithSegments.length;
       const gastoPromedio = totalPacientes > 0 
-        ? patientsWithSegments.reduce((sum, p) => sum + p.gasto_total_citas, 0) / totalPacientes 
+        ? patientsWithSegments.reduce((sum, p) => sum + (p.gasto_total_citas || 0), 0) / totalPacientes 
         : 0;
       const edadPromedio = totalPacientes > 0 
-        ? patientsWithSegments.reduce((sum, p) => sum + p.edad, 0) / totalPacientes 
+        ? patientsWithSegments.reduce((sum, p) => sum + (p.edad || 0), 0) / totalPacientes 
         : 0;
 
       // Estadísticas por ubicación
       const ubicacionStats = {};
       patientsWithSegments.forEach(p => {
-        if (!ubicacionStats[p.lugar]) {
-          ubicacionStats[p.lugar] = { count: 0, gasto_total: 0 };
+        const lugar = p.lugar || 'Sin especificar';
+        if (!ubicacionStats[lugar]) {
+          ubicacionStats[lugar] = { count: 0, gasto_total: 0 };
         }
-        ubicacionStats[p.lugar].count++;
-        ubicacionStats[p.lugar].gasto_total += p.gasto_total_citas;
+        ubicacionStats[lugar].count++;
+        ubicacionStats[lugar].gasto_total += (p.gasto_total_citas || 0);
       });
 
       console.log("=== SEGMENTACIÓN COMPLETADA ===");
@@ -1663,7 +1694,7 @@ router.post("/patients-segmentation", async (req, res) => {
 });
 
 /**
- * NUEVO ENDPOINT: Obtener opciones para filtros dinámicos
+ * ENDPOINT CORREGIDO: Obtener opciones para filtros dinámicos
  */
 router.get("/filter-options", async (req, res) => {
   try {
@@ -1678,7 +1709,7 @@ router.get("/filter-options", async (req, res) => {
       ORDER BY count DESC, lugar ASC
     `;
 
-    // Query para obtener servicios únicos
+    // Query para obtener servicios únicos (usando campos correctos)
     const serviciosQuery = `
       SELECT DISTINCT s.id, s.title, s.category, COUNT(c.id) as uso_count
       FROM servicios s
@@ -1686,6 +1717,7 @@ router.get("/filter-options", async (req, res) => {
       WHERE s.title IS NOT NULL
       GROUP BY s.id, s.title, s.category
       ORDER BY uso_count DESC, s.title ASC
+      LIMIT 50
     `;
 
     // Query para obtener rangos de datos
@@ -1698,7 +1730,7 @@ router.get("/filter-options", async (req, res) => {
       WHERE estado != 'Eliminado' AND fechaNacimiento IS NOT NULL
     `;
 
-    // Query para rangos de gastos
+    // Query para rangos de gastos (corregida)
     const gastosQuery = `
       SELECT 
         MIN(gasto_total) as gasto_min,
@@ -1711,6 +1743,7 @@ router.get("/filter-options", async (req, res) => {
         WHERE p.estado != 'Eliminado'
         GROUP BY p.id
       ) as gastos_pacientes
+      WHERE gasto_total > 0
     `;
 
     // Ejecutar queries en paralelo
@@ -1718,25 +1751,25 @@ router.get("/filter-options", async (req, res) => {
       new Promise((resolve, reject) => {
         db.query(ubicacionesQuery, (err, results) => {
           if (err) reject(err);
-          else resolve(results);
+          else resolve(results || []);
         });
       }),
       new Promise((resolve, reject) => {
         db.query(serviciosQuery, (err, results) => {
           if (err) reject(err);
-          else resolve(results);
+          else resolve(results || []);
         });
       }),
       new Promise((resolve, reject) => {
         db.query(rangosQuery, (err, results) => {
           if (err) reject(err);
-          else resolve(results[0]);
+          else resolve(results[0] || { edad_min: 18, edad_max: 80, total_pacientes: 0 });
         });
       }),
       new Promise((resolve, reject) => {
         db.query(gastosQuery, (err, results) => {
           if (err) reject(err);
-          else resolve(results[0]);
+          else resolve(results[0] || { gasto_min: 0, gasto_max: 10000, gasto_promedio: 0 });
         });
       })
     ]);
@@ -1757,16 +1790,16 @@ router.get("/filter-options", async (req, res) => {
         })),
         rangos: {
           edad: {
-            min: rangos.edad_min || 0,
-            max: rangos.edad_max || 100
+            min: rangos.edad_min || 18,
+            max: rangos.edad_max || 80
           },
           gastos: {
-            min: gastos.gasto_min || 0,
-            max: gastos.gasto_max || 10000,
+            min: 0,
+            max: Math.ceil((gastos.gasto_max || 10000) * 1.1), // 10% extra para el slider
             promedio: gastos.gasto_promedio || 0
           }
         },
-        total_pacientes: rangos.total_pacientes
+        total_pacientes: rangos.total_pacientes || 0
       }
     });
 
@@ -1778,5 +1811,4 @@ router.get("/filter-options", async (req, res) => {
     });
   }
 });
-
 module.exports = router;
