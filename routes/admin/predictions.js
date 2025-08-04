@@ -1435,4 +1435,348 @@ router.get("/clustering-model-info", (req, res) => {
   });
 });
 
+/**
+ * NUEVO ENDPOINT: Obtener pacientes con filtros y segmentación automática
+ */
+router.post("/patients-segmentation", async (req, res) => {
+  try {
+    const {
+      edad_min = 0,
+      edad_max = 100,
+      ubicaciones = [],
+      servicios = [],
+      gasto_min = 0,
+      gasto_max = 999999,
+      limit = 100,
+      search = ''
+    } = req.body;
+
+    console.log("=== SEGMENTACIÓN DINÁMICA DE PACIENTES ===");
+    console.log("Filtros:", { edad_min, edad_max, ubicaciones, servicios, gasto_min, gasto_max, limit, search });
+
+    // Construir query dinámico con filtros
+    let whereConditions = ['p.estado != "Eliminado"'];
+    let queryParams = [];
+
+    // Filtro por edad
+    if (edad_min > 0 || edad_max < 100) {
+      whereConditions.push(`
+        TIMESTAMPDIFF(YEAR, p.fechaNacimiento, CURDATE()) BETWEEN ? AND ?
+      `);
+      queryParams.push(edad_min, edad_max);
+    }
+
+    // Filtro por ubicaciones
+    if (ubicaciones.length > 0) {
+      const placeholders = ubicaciones.map(() => '?').join(',');
+      whereConditions.push(`p.lugar IN (${placeholders})`);
+      queryParams.push(...ubicaciones);
+    }
+
+    // Filtro por búsqueda de nombre
+    if (search.trim()) {
+      whereConditions.push(`
+        (CONCAT(p.nombre, ' ', p.aPaterno, ' ', COALESCE(p.aMaterno, '')) LIKE ? 
+         OR p.email LIKE ? 
+         OR p.telefono LIKE ?)
+      `);
+      const searchTerm = `%${search.trim()}%`;
+      queryParams.push(searchTerm, searchTerm, searchTerm);
+    }
+
+    const whereClause = whereConditions.join(' AND ');
+
+    const query = `
+      SELECT 
+        p.id as paciente_id,
+        p.nombre,
+        p.aPaterno,
+        p.aMaterno,
+        CONCAT(p.nombre, ' ', p.aPaterno, ' ', COALESCE(p.aMaterno, '')) as nombre_completo,
+        p.fechaNacimiento,
+        TIMESTAMPDIFF(YEAR, p.fechaNacimiento, CURDATE()) as edad,
+        p.genero,
+        p.lugar,
+        p.telefono,
+        p.email,
+        p.alergias,
+        p.estado as estado_paciente,
+        p.fecha_creacion,
+        
+        -- Datos financieros y de citas para clustering
+        COUNT(DISTINCT c.id) as total_citas,
+        COALESCE(SUM(c.precio_servicio), 0) as gasto_total_citas,
+        COALESCE(AVG(CASE WHEN c.precio_servicio > 0 THEN c.precio_servicio END), 0) as ticket_promedio,
+        COALESCE(MAX(c.precio_servicio), 0) as precio_maximo,
+        COUNT(CASE WHEN c.estado = 'Cancelada' THEN 1 END) as citas_canceladas,
+        COUNT(CASE WHEN c.estado = 'Completada' THEN 1 END) as citas_completadas,
+        COUNT(CASE WHEN c.estado_pago = 'Pendiente' THEN 1 END) as citas_pendientes_pago,
+        
+        -- Datos de tratamientos
+        COUNT(CASE WHEN t.estado = 'Activo' THEN 1 END) as tratamientos_activos,
+        COALESCE(AVG(CASE WHEN t.precio_total > 0 THEN t.precio_total END), 0) as valor_tratamiento_promedio,
+        
+        -- Tasa no-show y última cita
+        COALESCE(
+          COUNT(CASE WHEN c.estado IN ('Cancelada', 'No llegó') THEN 1 END) / NULLIF(COUNT(c.id), 0), 
+          0
+        ) as tasa_noshow,
+        MAX(c.fecha_consulta) as ultima_cita,
+        COALESCE(DATEDIFF(NOW(), MAX(c.fecha_consulta)), 0) as dias_desde_ultima_cita,
+        
+        -- Servicios únicos utilizados
+        COUNT(DISTINCT c.servicio_id) as servicios_unicos,
+        GROUP_CONCAT(DISTINCT s.category ORDER BY s.category) as categorias_servicios
+        
+      FROM pacientes p
+      LEFT JOIN citas c ON p.id = c.paciente_id AND c.archivado = 0
+      LEFT JOIN tratamientos t ON p.id = t.paciente_id
+      LEFT JOIN servicios s ON c.servicio_id = s.id
+      WHERE ${whereClause}
+      GROUP BY p.id, p.nombre, p.aPaterno, p.aMaterno, p.fechaNacimiento, 
+               p.genero, p.lugar, p.telefono, p.email, p.alergias, p.estado, p.fecha_creacion
+      HAVING gasto_total_citas BETWEEN ? AND ?
+      ORDER BY gasto_total_citas DESC, total_citas DESC
+      LIMIT ?
+    `;
+
+    queryParams.push(gasto_min, gasto_max, limit);
+
+    db.query(query, queryParams, async (err, results) => {
+      if (err) {
+        console.error("Error en query de segmentación:", err);
+        return res.status(500).json({
+          success: false,
+          error: "Error obteniendo pacientes de la base de datos"
+        });
+      }
+
+      console.log(`Pacientes obtenidos: ${results.length}`);
+
+      // Aplicar clustering a cada paciente
+      const patientsWithSegments = [];
+      let segmentStats = { VIP: 0, REGULARES: 0, PROBLEMÁTICOS: 0, ERRORES: 0 };
+
+      for (const patient of results) {
+        try {
+          // Preparar datos para clustering
+          const clusteringData = {
+            gasto_total_citas: patient.gasto_total_citas,
+            ticket_promedio: patient.ticket_promedio,
+            precio_maximo: patient.precio_maximo,
+            citas_canceladas: patient.citas_canceladas,
+            tratamientos_activos: patient.tratamientos_activos,
+            citas_pendientes_pago: patient.citas_pendientes_pago,
+            valor_tratamiento_promedio: patient.valor_tratamiento_promedio,
+            tasa_noshow: patient.tasa_noshow
+          };
+
+          // Llamar al script de clustering
+          const classificationResult = await executePatientClassification(clusteringData);
+
+          if (classificationResult.success) {
+            const patientWithSegment = {
+              ...patient,
+              cluster: classificationResult.cluster,
+              segmento: classificationResult.segmento,
+              confidence: classificationResult.confidence,
+              clasificacion_exitosa: true
+            };
+            
+            patientsWithSegments.push(patientWithSegment);
+            segmentStats[classificationResult.segmento]++;
+          } else {
+            // Si falla el clustering, agregar sin segmento
+            patientsWithSegments.push({
+              ...patient,
+              cluster: null,
+              segmento: 'NO_CLASIFICADO',
+              confidence: 0,
+              clasificacion_exitosa: false,
+              error_clasificacion: classificationResult.error
+            });
+            segmentStats.ERRORES++;
+          }
+
+        } catch (clusterError) {
+          console.error(`Error clasificando paciente ${patient.paciente_id}:`, clusterError);
+          patientsWithSegments.push({
+            ...patient,
+            cluster: null,
+            segmento: 'ERROR',
+            confidence: 0,
+            clasificacion_exitosa: false,
+            error_clasificacion: clusterError.message
+          });
+          segmentStats.ERRORES++;
+        }
+      }
+
+      // Calcular estadísticas adicionales
+      const totalPacientes = patientsWithSegments.length;
+      const gastoPromedio = totalPacientes > 0 
+        ? patientsWithSegments.reduce((sum, p) => sum + p.gasto_total_citas, 0) / totalPacientes 
+        : 0;
+      const edadPromedio = totalPacientes > 0 
+        ? patientsWithSegments.reduce((sum, p) => sum + p.edad, 0) / totalPacientes 
+        : 0;
+
+      // Estadísticas por ubicación
+      const ubicacionStats = {};
+      patientsWithSegments.forEach(p => {
+        if (!ubicacionStats[p.lugar]) {
+          ubicacionStats[p.lugar] = { count: 0, gasto_total: 0 };
+        }
+        ubicacionStats[p.lugar].count++;
+        ubicacionStats[p.lugar].gasto_total += p.gasto_total_citas;
+      });
+
+      console.log("=== SEGMENTACIÓN COMPLETADA ===");
+      console.log("Estadísticas por segmento:", segmentStats);
+
+      res.json({
+        success: true,
+        data: {
+          pacientes: patientsWithSegments,
+          estadisticas: {
+            total_pacientes: totalPacientes,
+            segmentos: segmentStats,
+            gasto_promedio: gastoPromedio,
+            edad_promedio: edadPromedio,
+            ubicaciones: ubicacionStats,
+            filtros_aplicados: {
+              edad_min, edad_max, ubicaciones, servicios, 
+              gasto_min, gasto_max, search
+            }
+          }
+        }
+      });
+    });
+
+  } catch (error) {
+    console.error("Error en patients-segmentation:", error);
+    res.status(500).json({
+      success: false,
+      error: `Error interno del servidor: ${error.message}`
+    });
+  }
+});
+
+/**
+ * NUEVO ENDPOINT: Obtener opciones para filtros dinámicos
+ */
+router.get("/filter-options", async (req, res) => {
+  try {
+    console.log("=== OBTENIENDO OPCIONES DE FILTROS ===");
+
+    // Query para obtener ubicaciones únicas
+    const ubicacionesQuery = `
+      SELECT DISTINCT lugar as ubicacion, COUNT(*) as count
+      FROM pacientes 
+      WHERE estado != 'Eliminado' AND lugar IS NOT NULL AND lugar != ''
+      GROUP BY lugar
+      ORDER BY count DESC, lugar ASC
+    `;
+
+    // Query para obtener servicios únicos
+    const serviciosQuery = `
+      SELECT DISTINCT s.id, s.title, s.category, COUNT(c.id) as uso_count
+      FROM servicios s
+      LEFT JOIN citas c ON s.id = c.servicio_id AND c.archivado = 0
+      WHERE s.title IS NOT NULL
+      GROUP BY s.id, s.title, s.category
+      ORDER BY uso_count DESC, s.title ASC
+    `;
+
+    // Query para obtener rangos de datos
+    const rangosQuery = `
+      SELECT 
+        MIN(TIMESTAMPDIFF(YEAR, fechaNacimiento, CURDATE())) as edad_min,
+        MAX(TIMESTAMPDIFF(YEAR, fechaNacimiento, CURDATE())) as edad_max,
+        COUNT(*) as total_pacientes
+      FROM pacientes 
+      WHERE estado != 'Eliminado' AND fechaNacimiento IS NOT NULL
+    `;
+
+    // Query para rangos de gastos
+    const gastosQuery = `
+      SELECT 
+        MIN(gasto_total) as gasto_min,
+        MAX(gasto_total) as gasto_max,
+        AVG(gasto_total) as gasto_promedio
+      FROM (
+        SELECT p.id, COALESCE(SUM(c.precio_servicio), 0) as gasto_total
+        FROM pacientes p
+        LEFT JOIN citas c ON p.id = c.paciente_id AND c.archivado = 0
+        WHERE p.estado != 'Eliminado'
+        GROUP BY p.id
+      ) as gastos_pacientes
+    `;
+
+    // Ejecutar queries en paralelo
+    const [ubicaciones, servicios, rangos, gastos] = await Promise.all([
+      new Promise((resolve, reject) => {
+        db.query(ubicacionesQuery, (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      }),
+      new Promise((resolve, reject) => {
+        db.query(serviciosQuery, (err, results) => {
+          if (err) reject(err);
+          else resolve(results);
+        });
+      }),
+      new Promise((resolve, reject) => {
+        db.query(rangosQuery, (err, results) => {
+          if (err) reject(err);
+          else resolve(results[0]);
+        });
+      }),
+      new Promise((resolve, reject) => {
+        db.query(gastosQuery, (err, results) => {
+          if (err) reject(err);
+          else resolve(results[0]);
+        });
+      })
+    ]);
+
+    res.json({
+      success: true,
+      options: {
+        ubicaciones: ubicaciones.map(u => ({
+          value: u.ubicacion,
+          label: `${u.ubicacion} (${u.count})`,
+          count: u.count
+        })),
+        servicios: servicios.map(s => ({
+          value: s.id,
+          label: s.title,
+          category: s.category,
+          uso_count: s.uso_count
+        })),
+        rangos: {
+          edad: {
+            min: rangos.edad_min || 0,
+            max: rangos.edad_max || 100
+          },
+          gastos: {
+            min: gastos.gasto_min || 0,
+            max: gastos.gasto_max || 10000,
+            promedio: gastos.gasto_promedio || 0
+          }
+        },
+        total_pacientes: rangos.total_pacientes
+      }
+    });
+
+  } catch (error) {
+    console.error("Error obteniendo opciones de filtros:", error);
+    res.status(500).json({
+      success: false,
+      error: `Error obteniendo opciones: ${error.message}`
+    });
+  }
+});
+
 module.exports = router;
