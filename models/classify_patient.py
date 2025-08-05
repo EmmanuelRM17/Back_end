@@ -5,16 +5,15 @@ import sys
 import json
 import joblib
 import numpy as np
-import pandas as pd
 from pathlib import Path
 
 def load_models():
-    """Carga los modelos entrenados"""
+    """Carga los modelos entrenados - VERSION SIMPLE"""
     try:
         model_path = Path(__file__).parent
-        # Usar el modelo completo exportado desde Jupyter
+        # Cargar modelo simple (sin funciones)
         modelo_completo = joblib.load(model_path / 'modelo_clustering_completo.pkl')
-        return modelo_completo['kmeans'], modelo_completo['scaler']
+        return modelo_completo['kmeans'], modelo_completo['scaler'], modelo_completo['cluster_labels']
     except Exception as e:
         raise Exception(f"Error cargando modelos: {str(e)}")
 
@@ -28,8 +27,8 @@ def safe_float_conversion(value, default=0.0):
         return default
 
 def preprocess_patient_data(patient_data):
-    """Preprocesa los datos del paciente para el modelo - VARIABLES CORRECTAS"""
-    # Variables que SÍ usó el modelo original
+    """Preprocesa los datos del paciente para el modelo"""
+    # Variables que usa el modelo original
     required_features = [
         'tasa_noshow',
         'tasa_completion', 
@@ -68,7 +67,7 @@ def classify_patient(patient_data):
         print(f"DEBUG: Datos recibidos: {patient_data}", file=sys.stderr)
         
         # Cargar modelos
-        kmeans, scaler = load_models()
+        kmeans, scaler, cluster_labels = load_models()
         
         # Preprocesar datos
         features = preprocess_patient_data(patient_data)
@@ -82,21 +81,17 @@ def classify_patient(patient_data):
         cluster = kmeans.predict(features_scaled)[0]
         print(f"DEBUG: Cluster predicho: {cluster}", file=sys.stderr)
         
-        # Mapeo de clusters a segmentos (según tu análisis original)
-        segment_mapping = {
-            0: 'Cumplido',      # Buen comportamiento
-            1: 'Problemático',  # Alto noshow, bajo completion
-            2: 'Irregular'      # Comportamiento inconsistente
-        }
+        # Obtener segmento usando el mapeo cargado
+        segmento = cluster_labels.get(cluster, 'DESCONOCIDO')
         
-        # Obtener probabilidades/distancias para confianza
+        # Obtener distancias para confianza
         distances = kmeans.transform(features_scaled)[0]
         confidence = 1 - (min(distances) / max(distances)) if max(distances) > 0 else 1
         
         result = {
             'success': True,
             'cluster': int(cluster),
-            'segmento': segment_mapping.get(cluster, 'DESCONOCIDO'),
+            'segmento': segmento,
             'confidence': round(float(confidence), 3),
             'patient_id': patient_data.get('paciente_id', 'N/A')
         }
