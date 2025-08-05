@@ -943,7 +943,7 @@ router.post("/send-reminder", async (req, res) => {
 
       const mailOptions = {
         from: '"Odontología Carol" <sistema@odontologiacarol.com>',
-        to: email,
+to: 'emma041117@gmail.com',
         subject: "Recordatorio Importante de Cita - Odontología Carol",
         html: `
           <div style="font-family: 'Roboto', Arial, sans-serif; color: #333; max-width: 600px; margin: 0 auto; background-color: #fafafa;">
