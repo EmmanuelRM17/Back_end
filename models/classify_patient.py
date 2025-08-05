@@ -12,9 +12,9 @@ def load_models():
     """Carga los modelos entrenados"""
     try:
         model_path = Path(__file__).parent
-        kmeans = joblib.load(model_path / 'modelo_clustering_kmeans.pkl')
-        scaler = joblib.load(model_path / 'scaler_clustering.pkl')
-        return kmeans, scaler
+        # Usar el modelo completo exportado desde Jupyter
+        modelo_completo = joblib.load(model_path / 'modelo_clustering_completo.pkl')
+        return modelo_completo['kmeans'], modelo_completo['scaler']
     except Exception as e:
         raise Exception(f"Error cargando modelos: {str(e)}")
 
@@ -27,54 +27,37 @@ def safe_float_conversion(value, default=0.0):
     except (ValueError, TypeError):
         return default
 
-def safe_int_conversion(value, default=0):
-    """Convierte un valor a int de forma segura"""
-    try:
-        if value is None or value == '' or value == 'null':
-            return default
-        return int(float(value))  # Convertir a float primero, luego a int
-    except (ValueError, TypeError):
-        return default
-
 def preprocess_patient_data(patient_data):
-    """Preprocesa los datos del paciente para el modelo"""
-    # Variables importantes del modelo (las 8 seleccionadas)
+    """Preprocesa los datos del paciente para el modelo - VARIABLES CORRECTAS"""
+    # Variables que SÍ usó el modelo original
     required_features = [
-        'gasto_total_citas',
-        'ticket_promedio', 
-        'precio_maximo',
+        'tasa_noshow',
+        'tasa_completion', 
         'citas_canceladas',
-        'tratamientos_activos',
-        'citas_pendientes_pago',
-        'valor_tratamiento_promedio',
-        'tasa_noshow'
+        'tasa_pago_exitoso'
     ]
     
-    # Crear DataFrame con las features requeridas
+    # Crear array con las features requeridas
     processed_data = []
     
     for feature in required_features:
         raw_value = patient_data.get(feature, 0)
         
         # Convertir a número de forma segura
-        if feature in ['citas_canceladas', 'tratamientos_activos', 'citas_pendientes_pago']:
-            # Estos son enteros
-            value = safe_int_conversion(raw_value, 0)
+        if feature == 'citas_canceladas':
+            # Este es entero
+            try:
+                value = int(float(raw_value)) if raw_value else 0
+            except:
+                value = 0
         else:
-            # Estos son floats
+            # Estos son tasas (float entre 0 y 1)
             value = safe_float_conversion(raw_value, 0.0)
-        
-        # Aplicar transformaciones logarítmicas como en el entrenamiento
-        if feature in ['gasto_total_citas', 'ticket_promedio']:
-            # Solo aplicar log si el valor es mayor que 0
-            if value > 0:
-                value = np.log1p(float(value))
-            else:
-                value = 0.0
-        else:
-            value = float(value)
+            # Asegurar que las tasas estén entre 0 y 1
+            if feature.startswith('tasa_'):
+                value = max(0.0, min(1.0, value))
             
-        processed_data.append(value)
+        processed_data.append(float(value))
     
     return np.array(processed_data).reshape(1, -1)
 
@@ -99,11 +82,11 @@ def classify_patient(patient_data):
         cluster = kmeans.predict(features_scaled)[0]
         print(f"DEBUG: Cluster predicho: {cluster}", file=sys.stderr)
         
-        # Mapeo de clusters a segmentos
+        # Mapeo de clusters a segmentos (según tu análisis original)
         segment_mapping = {
-            0: 'VIP',
-            1: 'REGULARES', 
-            2: 'PROBLEMÁTICOS'
+            0: 'Cumplido',      # Buen comportamiento
+            1: 'Problemático',  # Alto noshow, bajo completion
+            2: 'Irregular'      # Comportamiento inconsistente
         }
         
         # Obtener probabilidades/distancias para confianza
