@@ -538,4 +538,58 @@ router.post("/logout", (req, res) => {
   });
 });
 
+
+//MOVIL 
+// Endpoint para validar correo y contraseña de pacientes en la app móvil
+router.post("/loginMovil", async (req, res) => {
+  try {
+    const email = xss(req.body.email); // Sanitizar input
+    const password = xss(req.body.password);
+
+    if (!email || !password) {
+      return res
+        .status(400)
+        .json({ message: "Proporciona correo y contraseña." });
+    }
+
+    // Consultar paciente por correo
+    const checkUserSql = "SELECT * FROM pacientes WHERE email = ?";
+    db.query(checkUserSql, [email], async (err, resultPaciente) => {
+      if (err) {
+        logger.error(`Error al verificar correo del paciente: ${err.message}`);
+        return res
+          .status(500)
+          .json({ message: "Error al verificar correo." });
+      }
+
+      if (resultPaciente.length === 0) {
+        return res.status(404).json({ message: "Correo no registrado." });
+      }
+
+      const paciente = resultPaciente[0];
+
+      // Verificar la contraseña
+      const isMatch = await bcrypt.compare(password, paciente.password);
+      if (!isMatch) {
+        return res.status(401).json({ message: "Contraseña incorrecta." });
+      }
+
+      // Éxito: las credenciales son válidas
+      return res.status(200).json({
+        message: "Credenciales válidas",
+        user: {
+          id: paciente.id,
+          nombre: paciente.nombre,
+          email: paciente.email,
+          tipo: "paciente",
+        },
+      });
+    });
+  } catch (error) {
+    logger.error(`Error en /loginMovil: ${error.message}`);
+    res.status(500).json({ message: "Error del servidor." });
+  }
+});
+
+
 module.exports = router;
