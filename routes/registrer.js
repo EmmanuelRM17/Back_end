@@ -22,7 +22,7 @@ const transporter = nodemailer.createTransport({
   secure: true,
   auth: {
     user: "sistema@odontologiacarol.com",
-    pass: "sP8+?;Vs:",
+    pass: "PV9Edv&E2iBh@yn",
   },
 });
 
