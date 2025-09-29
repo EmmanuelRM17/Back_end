@@ -23,7 +23,7 @@ const transporter = nodemailer.createTransport({
   requireTLS: true, // Fuerza el uso de TLS para seguridad
   auth: {
     user: "sistema@odontologiacarol.com",
-    pass: "ql?5Zn4^2U",
+    pass: "sP8+?;Vs:",
   },
   connectionTimeout: 60000, // 60 segundos de tiempo de espera
   greetingTimeout: 30000, // 30 segundos para el saludo del servidor
