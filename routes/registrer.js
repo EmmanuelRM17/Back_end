@@ -18,12 +18,16 @@ const rateLimiter = new RateLimiterMemory({
 // Configuración de nodemailer
 const transporter = nodemailer.createTransport({
   host: "smtp.hostinger.com",
-  port: 465,
-  secure: true,
+  port: 587,
+  secure: false, // Usa STARTTLS en lugar de SSL directo
+  requireTLS: true, // Fuerza el uso de TLS para seguridad
   auth: {
     user: "sistema@odontologiacarol.com",
     pass: "PV9Edv&E2iBh@yn",
   },
+  connectionTimeout: 60000, // 60 segundos de tiempo de espera
+  greetingTimeout: 30000, // 30 segundos para el saludo del servidor
+  socketTimeout: 30000 // 30 segundos para operaciones de socket
 });
 
 // Función para eliminar registros incompletos después de 10 minutos
