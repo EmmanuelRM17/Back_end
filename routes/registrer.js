@@ -25,6 +25,7 @@ const transporter = nodemailer.createTransport({
     pass: "sP8+?;Vs:",
   },
 });
+
 // Función para eliminar registros incompletos después de 10 minutos
 const eliminarRegistrosIncompletos = () => {
   const sql = `DELETE FROM pacientes 
