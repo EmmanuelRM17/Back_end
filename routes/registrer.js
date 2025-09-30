@@ -15,16 +15,29 @@ const rateLimiter = new RateLimiterMemory({
   duration: 3 * 60 * 60,
 });
 
-// Configuración de nodemailer
-const transporter = nodemailer.createTransport({
-  host: "smtp.hostinger.com",
-  port: 465,
-  secure: true,
-  auth: {
-    user: "sistema@odontologiacarol.com",
-    pass: "sP8+?;Vs:",
-  },
-});
+// Función para enviar correos via Vercel
+async function enviarCorreo(to, subject, html) {
+  try {
+    const response = await fetch('https://email-vercel-sigma.vercel.app/api/send-email', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': 'tu_clave_secreta_123'
+      },
+      body: JSON.stringify({ to, subject, html })
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.error || 'Error al enviar correo');
+    }
+
+    return await response.json();
+  } catch (error) {
+    logger.error('Error al enviar correo:', error);
+    throw error;
+  }
+}
 
 // Función para eliminar registros incompletos después de 10 minutos
 const eliminarRegistrosIncompletos = () => {
@@ -111,7 +124,7 @@ router.post("/register", async (req, res) => {
       hoy.getFullYear() -
       nacimiento.getFullYear() -
       (hoy <
-      new Date(hoy.getFullYear(), nacimiento.getMonth(), nacimiento.getDate())
+        new Date(hoy.getFullYear(), nacimiento.getMonth(), nacimiento.getDate())
         ? 1
         : 0);
     const esMenorDeEdad = edad < 18;
@@ -305,7 +318,7 @@ router.post("/recuperacion", async (req, res) => {
     db.query(
       updateTokenSql,
       [token, tokenExpiration, email],
-      (err, updateResult) => {
+       async  (err, updateResult) => {
         if (err) {
           logger.error("Error al actualizar token:", err);
           return res
@@ -352,22 +365,14 @@ router.post("/recuperacion", async (req, res) => {
                 `,
         };
 
-        transporter.sendMail(mailOptions, (err, info) => {
-          if (err) {
-            logger.error("Error al enviar el correo de recuperación:", err);
-            return res
-              .status(500)
-              .json({ message: "Error al enviar el correo de recuperación." });
-          }
-          logger.info(
-            `Correo de recuperación enviado correctamente a: ${email} (tipo: ${tabla})`
-          );
-          res
-            .status(200)
-            .json({
-              message: "Se ha enviado un enlace de recuperación a tu correo.",
-            });
-        });
+        try {
+          await enviarCorreo(email, mailOptions.subject, mailOptions.html);
+          logger.info(`Correo de recuperación enviado correctamente a: ${email} (tipo: ${tabla})`);
+          res.status(200).json({ message: "Se ha enviado un enlace de recuperación a tu correo." });
+        } catch (mailError) {
+          logger.error("Error al enviar el correo de recuperación:", mailError);
+          return res.status(500).json({ message: "Error al enviar el correo de recuperación." });
+        }
       }
     );
   } catch (rateLimiterError) {
@@ -616,12 +621,10 @@ router.post("/send-verification-email", (req, res) => {
         };
 
         try {
-          await transporter.sendMail(mailOptions);
+          await enviarCorreo(email, mailOptions.subject, mailOptions.html);
           res.status(200).json({ message: "Correo de verificación enviado." });
         } catch (mailError) {
-          return res
-            .status(500)
-            .json({ message: "Error al enviar el correo de verificación." });
+          return res.status(500).json({ message: "Error al enviar el correo de verificación." });
         }
       }
     );
@@ -816,16 +819,11 @@ function handleVerificationCode(userType, email, res) {
                 `,
       };
       try {
-        // Enviar el correo
-        await transporter.sendMail(mailOptions);
-        return res
-          .status(200)
-          .json({ message: "Código de verificación enviado al correo." });
+        await enviarCorreo(email, mailOptions.subject, mailOptions.html);
+        return res.status(200).json({ message: "Código de verificación enviado al correo." });
       } catch (mailError) {
         console.error("Error al enviar el correo:", mailError);
-        return res
-          .status(500)
-          .json({ message: "Error al enviar el correo de verificación." });
+        return res.status(500).json({ message: "Error al enviar el correo de verificación." });
       }
     }
   );
