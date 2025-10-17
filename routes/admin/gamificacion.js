@@ -225,6 +225,66 @@ router.post("/paciente/asignar", (req, res) => {
   });
 });
 
+// Descontar puntos manualmente
+router.post("/paciente/descontar", (req, res) => {
+  const { id_paciente, puntos, concepto } = req.body;
+  
+  if (!id_paciente || !puntos || !concepto) {
+    return res.status(400).json({ error: "Faltan datos requeridos" });
+  }
+  
+  if (puntos <= 0) {
+    return res.status(400).json({ error: "Los puntos deben ser mayores a 0" });
+  }
+  
+  // Verificar saldo disponible
+  const queryCheck = "SELECT puntos_disponibles FROM gamificacion_paciente WHERE id_paciente = ?";
+  
+  db.query(queryCheck, [id_paciente], (err, results) => {
+    if (err) {
+      console.error("Error al verificar saldo:", err);
+      return res.status(500).json({ error: "Error al verificar saldo" });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Paciente no encontrado" });
+    }
+    
+    if (results[0].puntos_disponibles < puntos) {
+      return res.status(400).json({ error: "Puntos insuficientes" });
+    }
+    
+    // Descontar puntos
+    const queryUpdate = `
+      UPDATE gamificacion_paciente 
+      SET puntos_disponibles = puntos_disponibles - ?,
+          fecha_actualizacion = NOW()
+      WHERE id_paciente = ?
+    `;
+    
+    db.query(queryUpdate, [puntos, id_paciente], (err) => {
+      if (err) {
+        console.error("Error al descontar puntos:", err);
+        return res.status(500).json({ error: "Error al descontar puntos" });
+      }
+      
+      // Registrar en historial
+      const queryHistorial = `
+        INSERT INTO historial_puntos 
+        (id_paciente, puntos, concepto, tipo) 
+        VALUES (?, ?, ?, 'descontado')
+      `;
+      
+      db.query(queryHistorial, [id_paciente, -puntos, concepto], (err) => {
+        if (err) {
+          console.error("Error al registrar historial:", err);
+        }
+        res.status(200).json({ message: "Puntos descontados correctamente" });
+      });
+    });
+  });
+});
+
 
 
 module.exports = router;
