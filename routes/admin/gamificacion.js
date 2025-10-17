@@ -389,6 +389,32 @@ router.post("/canjear", (req, res) => {
   });
 });
 
+// ==================== HISTORIAL ====================
+
+// Obtener historial de puntos de un paciente
+router.get("/historial-puntos/:id_paciente", (req, res) => {
+  const { id_paciente } = req.params;
+  const { limite } = req.query;
+  
+  let query = `
+    SELECT * FROM historial_puntos 
+    WHERE id_paciente = ? 
+    ORDER BY fecha DESC
+  `;
+  
+  if (limite) {
+    query += ` LIMIT ${parseInt(limite)}`;
+  }
+  
+  db.query(query, [id_paciente], (err, results) => {
+    if (err) {
+      console.error("Error al obtener historial:", err);
+      return res.status(500).json({ error: "Error al obtener historial" });
+    }
+    res.status(200).json(results);
+  });
+});
+
 
 
 
