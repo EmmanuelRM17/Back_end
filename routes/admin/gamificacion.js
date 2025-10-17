@@ -467,6 +467,41 @@ router.get("/verificar-canje/:codigo", (req, res) => {
   });
 });
 
+// Marcar canje como usado
+router.put("/usar-canje/:codigo", (req, res) => {
+  const { codigo } = req.params;
+  
+  const queryCheck = "SELECT estado FROM historial_canjeos WHERE codigo_canje = ?";
+  
+  db.query(queryCheck, [codigo], (err, results) => {
+    if (err) {
+      console.error("Error al verificar canje:", err);
+      return res.status(500).json({ error: "Error al verificar canje" });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Código no encontrado" });
+    }
+    
+    if (results[0].estado === 'usado') {
+      return res.status(400).json({ error: "Este código ya fue utilizado" });
+    }
+    
+    if (results[0].estado === 'expirado') {
+      return res.status(400).json({ error: "Este código está expirado" });
+    }
+    
+    const queryUpdate = "UPDATE historial_canjeos SET estado = 'usado' WHERE codigo_canje = ?";
+    
+    db.query(queryUpdate, [codigo], (err) => {
+      if (err) {
+        console.error("Error al marcar como usado:", err);
+        return res.status(500).json({ error: "Error al actualizar canje" });
+      }
+      res.status(200).json({ message: "Canje marcado como usado" });
+    });
+  });
+});
 
 
 module.exports = router;
