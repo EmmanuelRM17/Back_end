@@ -436,6 +436,37 @@ router.get("/historial-canjeos/:id_paciente", (req, res) => {
   });
 });
 
+// Verificar código de canje
+router.get("/verificar-canje/:codigo", (req, res) => {
+  const { codigo } = req.params;
+  
+  const query = `
+    SELECT hc.*, 
+           CONCAT(p.nombre, ' ', p.aPaterno, ' ', p.aMaterno) as nombre_paciente,
+           p.email,
+           gr.nombre as nombre_recompensa,
+           gr.descripcion,
+           gr.premio
+    FROM historial_canjeos hc
+    JOIN pacientes p ON hc.id_paciente = p.id
+    JOIN gamificacion_recompensa gr ON hc.id_recompensa = gr.id
+    WHERE hc.codigo_canje = ?
+  `;
+  
+  db.query(query, [codigo], (err, results) => {
+    if (err) {
+      console.error("Error al verificar código:", err);
+      return res.status(500).json({ error: "Error al verificar código" });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Código no encontrado" });
+    }
+    
+    res.status(200).json(results[0]);
+  });
+});
+
 
 
 module.exports = router;
