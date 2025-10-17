@@ -415,6 +415,26 @@ router.get("/historial-puntos/:id_paciente", (req, res) => {
   });
 });
 
+// Obtener historial de canjeos de un paciente
+router.get("/historial-canjeos/:id_paciente", (req, res) => {
+  const { id_paciente } = req.params;
+  
+  const query = `
+    SELECT hc.*, gr.nombre as nombre_recompensa, gr.descripcion, gr.icono
+    FROM historial_canjeos hc
+    JOIN gamificacion_recompensa gr ON hc.id_recompensa = gr.id
+    WHERE hc.id_paciente = ?
+    ORDER BY hc.fecha_canje DESC
+  `;
+  
+  db.query(query, [id_paciente], (err, results) => {
+    if (err) {
+      console.error("Error al obtener historial de canjeos:", err);
+      return res.status(500).json({ error: "Error al obtener historial" });
+    }
+    res.status(200).json(results);
+  });
+});
 
 
 
