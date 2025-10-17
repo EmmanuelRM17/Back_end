@@ -77,6 +77,7 @@ const loginalexa =require("./routes/pacientes/alexalogin.js")
 const whatsappRouter = require('./routes/whatsapp');
 
 const mlPredictions = require("./routes/admin/predictions");
+const gamificacion = require("./routes/admin/gamificacion");
 
 // Asignar rutas
 app.use("/api", Registrer);
@@ -101,6 +102,7 @@ app.use("/api/calendario",CalendarioCitas);
 app.use("/api/Graficas",Graficas);
 app.use("/api/Finanzas",Finanzas);
 app.use("/api/resenya" ,resenyas);
+app.use("/api/gamificacion", gamificacion); 
 
 //empleados
 app.use("/api/expediente", expediente);
