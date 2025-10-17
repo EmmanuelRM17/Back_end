@@ -131,6 +131,42 @@ router.get("/paciente/:id", (req, res) => {
   });
 });
 
+// Inicializar gamificación para paciente
+router.post("/paciente/inicializar", (req, res) => {
+  const { id_paciente } = req.body;
+  
+  if (!id_paciente) {
+    return res.status(400).json({ error: "ID de paciente requerido" });
+  }
+  
+  const queryCheck = "SELECT id FROM gamificacion_paciente WHERE id_paciente = ?";
+  
+  db.query(queryCheck, [id_paciente], (err, results) => {
+    if (err) {
+      console.error("Error al verificar paciente:", err);
+      return res.status(500).json({ error: "Error al verificar paciente" });
+    }
+    
+    if (results.length > 0) {
+      return res.status(400).json({ error: "Paciente ya tiene gamificación activa" });
+    }
+    
+    const queryInsert = `
+      INSERT INTO gamificacion_paciente 
+      (id_paciente, puntos_disponibles, puntos_totales, descuento, nivel, estado) 
+      VALUES (?, 0, 0, 0, 1, 1)
+    `;
+    
+    db.query(queryInsert, [id_paciente], (err, result) => {
+      if (err) {
+        console.error("Error al inicializar gamificación:", err);
+        return res.status(500).json({ error: "Error al inicializar gamificación" });
+      }
+      res.status(201).json({ message: "Gamificación inicializada", id: result.insertId });
+    });
+  });
+});
+
 
 
 
