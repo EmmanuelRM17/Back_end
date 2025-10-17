@@ -285,6 +285,16 @@ router.post("/paciente/descontar", (req, res) => {
   });
 });
 
+// ==================== CANJEAR RECOMPENSA ====================
+
+// Generar código único de canje
+function generarCodigoCanje() {
+  const timestamp = Date.now().toString();
+  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+  return `ODP${timestamp.slice(-4)}${random}`;
+}
+
+
 
 
 module.exports = router;
