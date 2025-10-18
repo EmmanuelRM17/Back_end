@@ -292,4 +292,36 @@ router.delete("/servicios-gamificacion/:id", (req, res) => {
   });
 });
 
+// ==================== PACIENTES GAMIFICACIÓN ====================
+
+// Obtener todos los pacientes con sus puntos
+router.get("/pacientes-gamificacion", (req, res) => {
+  const query = `
+    SELECT 
+      gp.id,
+      gp.id_paciente,
+      gp.puntos_disponibles,
+      gp.puntos_totales,
+      gp.descuento,
+      gp.nivel,
+      gp.fecha_actualizacion,
+      gp.estado,
+      CONCAT(p.nombre, ' ', p.aPaterno, ' ', p.aMaterno) as nombre_completo,
+      p.email,
+      p.telefono
+    FROM gamificacion_paciente gp
+    INNER JOIN pacientes p ON gp.id_paciente = p.id
+    WHERE gp.estado = 1
+    ORDER BY gp.puntos_disponibles DESC
+  `;
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error("Error al obtener pacientes:", err);
+      return res.status(500).json({ error: "Error al obtener pacientes" });
+    }
+    res.status(200).json(results);
+  });
+});
+
 module.exports = router;
