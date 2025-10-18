@@ -20,5 +20,22 @@ router.get("/recompensas", (req, res) => {
   });
 });
 
+// Obtener recompensas activas
+router.get("/recompensas/activas", (req, res) => {
+  const query = `
+    SELECT * FROM gamificacion_recompensa 
+    WHERE estado = 1 
+    ORDER BY orden ASC, puntos_requeridos ASC
+  `;
+  
+  db.query(query, (err, results) => {
+    if (err) {
+      console.error("Error al obtener recompensas activas:", err);
+      return res.status(500).json({ error: "Error al obtener recompensas" });
+    }
+    res.status(200).json(results);
+  });
+});
+
 
 module.exports = router;
