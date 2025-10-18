@@ -324,4 +324,29 @@ router.get("/pacientes-gamificacion", (req, res) => {
   });
 });
 
+// ==================== PUNTOS PACIENTE ====================
+
+// Obtener saldo del paciente
+router.get("/paciente/:id", (req, res) => {
+  const { id } = req.params;
+  
+  const query = `
+    SELECT * FROM gamificacion_paciente 
+    WHERE id_paciente = ? AND estado = 1
+  `;
+  
+  db.query(query, [id], (err, results) => {
+    if (err) {
+      console.error("Error al obtener puntos:", err);
+      return res.status(500).json({ error: "Error al obtener puntos" });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Paciente no encontrado en gamificación" });
+    }
+    
+    res.status(200).json(results[0]);
+  });
+});
+
 module.exports = router;
