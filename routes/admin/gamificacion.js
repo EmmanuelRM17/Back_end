@@ -607,4 +607,118 @@ router.post("/canjear", (req, res) => {
   });
 });
 
+// ==================== HISTORIAL ====================
+
+// Obtener historial de puntos de un paciente
+router.get("/historial-puntos/:id_paciente", (req, res) => {
+  const { id_paciente } = req.params;
+  const { limite } = req.query;
+  
+  let query = `
+    SELECT * FROM historial_puntos 
+    WHERE id_paciente = ? 
+    ORDER BY fecha DESC
+  `;
+  
+  if (limite) {
+    query += ` LIMIT ${parseInt(limite)}`;
+  }
+  
+  db.query(query, [id_paciente], (err, results) => {
+    if (err) {
+      console.error("Error al obtener historial:", err);
+      return res.status(500).json({ error: "Error al obtener historial" });
+    }
+    res.status(200).json(results);
+  });
+});
+
+// Obtener historial de canjeos de un paciente
+router.get("/historial-canjeos/:id_paciente", (req, res) => {
+  const { id_paciente } = req.params;
+  
+  const query = `
+    SELECT hc.*, gr.nombre as nombre_recompensa, gr.descripcion, gr.icono
+    FROM historial_canjeos hc
+    JOIN gamificacion_recompensa gr ON hc.id_recompensa = gr.id
+    WHERE hc.id_paciente = ?
+    ORDER BY hc.fecha_canje DESC
+  `;
+  
+  db.query(query, [id_paciente], (err, results) => {
+    if (err) {
+      console.error("Error al obtener historial de canjeos:", err);
+      return res.status(500).json({ error: "Error al obtener historial" });
+    }
+    res.status(200).json(results);
+  });
+});
+
+// Verificar código de canje
+router.get("/verificar-canje/:codigo", (req, res) => {
+  const { codigo } = req.params;
+  
+  const query = `
+    SELECT hc.*, 
+           CONCAT(p.nombre, ' ', p.aPaterno, ' ', p.aMaterno) as nombre_paciente,
+           p.email,
+           gr.nombre as nombre_recompensa,
+           gr.descripcion,
+           gr.premio
+    FROM historial_canjeos hc
+    JOIN pacientes p ON hc.id_paciente = p.id
+    JOIN gamificacion_recompensa gr ON hc.id_recompensa = gr.id
+    WHERE hc.codigo_canje = ?
+  `;
+  
+  db.query(query, [codigo], (err, results) => {
+    if (err) {
+      console.error("Error al verificar código:", err);
+      return res.status(500).json({ error: "Error al verificar código" });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Código no encontrado" });
+    }
+    
+    res.status(200).json(results[0]);
+  });
+});
+
+// Marcar canje como usado
+router.put("/usar-canje/:codigo", (req, res) => {
+  const { codigo } = req.params;
+  
+  const queryCheck = "SELECT estado FROM historial_canjeos WHERE codigo_canje = ?";
+  
+  db.query(queryCheck, [codigo], (err, results) => {
+    if (err) {
+      console.error("Error al verificar canje:", err);
+      return res.status(500).json({ error: "Error al verificar canje" });
+    }
+    
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Código no encontrado" });
+    }
+    
+    if (results[0].estado === 'usado') {
+      return res.status(400).json({ error: "Este código ya fue utilizado" });
+    }
+    
+    if (results[0].estado === 'expirado') {
+      return res.status(400).json({ error: "Este código está expirado" });
+    }
+    
+    const queryUpdate = "UPDATE historial_canjeos SET estado = 'usado' WHERE codigo_canje = ?";
+    
+    db.query(queryUpdate, [codigo], (err) => {
+      if (err) {
+        console.error("Error al marcar como usado:", err);
+        return res.status(500).json({ error: "Error al actualizar canje" });
+      }
+      res.status(200).json({ message: "Canje marcado como usado" });
+    });
+  });
+});
+
 module.exports = router;
