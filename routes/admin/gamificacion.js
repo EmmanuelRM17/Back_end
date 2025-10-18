@@ -503,5 +503,108 @@ router.post("/paciente/descontar", (req, res) => {
   });
 });
 
+// ==================== CANJEAR RECOMPENSA ====================
+
+// Generar código único de canje
+function generarCodigoCanje() {
+  const timestamp = Date.now().toString();
+  const random = Math.floor(Math.random() * 10000).toString().padStart(4, '0');
+  return `ODP${timestamp.slice(-4)}${random}`;
+}
+
+// Canjear recompensa
+router.post("/canjear", (req, res) => {
+  const { id_paciente, id_recompensa } = req.body;
+  
+  if (!id_paciente || !id_recompensa) {
+    return res.status(400).json({ error: "Faltan datos requeridos" });
+  }
+  
+  // Obtener datos del paciente y recompensa
+  const queryPaciente = "SELECT puntos_disponibles FROM gamificacion_paciente WHERE id_paciente = ?";
+  const queryRecompensa = "SELECT puntos_requeridos, nombre FROM gamificacion_recompensa WHERE id = ? AND estado = 1";
+  
+  db.query(queryPaciente, [id_paciente], (err, resPaciente) => {
+    if (err) {
+      console.error("Error al verificar paciente:", err);
+      return res.status(500).json({ error: "Error al verificar paciente" });
+    }
+    
+    if (resPaciente.length === 0) {
+      return res.status(404).json({ error: "Paciente no encontrado" });
+    }
+    
+    db.query(queryRecompensa, [id_recompensa], (err, resRecompensa) => {
+      if (err) {
+        console.error("Error al verificar recompensa:", err);
+        return res.status(500).json({ error: "Error al verificar recompensa" });
+      }
+      
+      if (resRecompensa.length === 0) {
+        return res.status(404).json({ error: "Recompensa no disponible" });
+      }
+      
+      const puntosDisponibles = resPaciente[0].puntos_disponibles;
+      const puntosRequeridos = resRecompensa[0].puntos_requeridos;
+      const nombreRecompensa = resRecompensa[0].nombre;
+      
+      if (puntosDisponibles < puntosRequeridos) {
+        return res.status(400).json({ error: "Puntos insuficientes" });
+      }
+      
+      const codigoCanje = generarCodigoCanje();
+      
+      // Descontar puntos
+      const queryUpdate = `
+        UPDATE gamificacion_paciente 
+        SET puntos_disponibles = puntos_disponibles - ?,
+            fecha_actualizacion = NOW()
+        WHERE id_paciente = ?
+      `;
+      
+      db.query(queryUpdate, [puntosRequeridos, id_paciente], (err) => {
+        if (err) {
+          console.error("Error al descontar puntos:", err);
+          return res.status(500).json({ error: "Error al procesar canje" });
+        }
+        
+        // Registrar en historial de puntos
+        const queryHistorial = `
+          INSERT INTO historial_puntos 
+          (id_paciente, puntos, concepto, tipo) 
+          VALUES (?, ?, ?, 'descontado')
+        `;
+        
+        const concepto = `Canje: ${nombreRecompensa}`;
+        
+        db.query(queryHistorial, [id_paciente, -puntosRequeridos, concepto], (err) => {
+          if (err) {
+            console.error("Error al registrar historial puntos:", err);
+          }
+        });
+        
+        // Registrar en historial de canjeos
+        const queryCanje = `
+          INSERT INTO historial_canjeos 
+          (id_paciente, id_recompensa, puntos_canjeados, codigo_canje, estado) 
+          VALUES (?, ?, ?, ?, 'activo')
+        `;
+        
+        db.query(queryCanje, [id_paciente, id_recompensa, puntosRequeridos, codigoCanje], (err, result) => {
+          if (err) {
+            console.error("Error al registrar canje:", err);
+            return res.status(500).json({ error: "Error al registrar canje" });
+          }
+          
+          res.status(200).json({ 
+            message: "Canje exitoso", 
+            codigo_canje: codigoCanje,
+            id_canje: result.insertId
+          });
+        });
+      });
+    });
+  });
+});
 
 module.exports = router;
