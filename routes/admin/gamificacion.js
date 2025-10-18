@@ -60,4 +60,30 @@ router.post("/recompensas", (req, res) => {
   });
 });
 
+// Editar recompensa
+router.put("/recompensas/:id", (req, res) => {
+  const { id } = req.params;
+  const { nombre, descripcion, tipo, puntos_requeridos, icono, premio, orden, estado } = req.body;
+  
+  const query = `
+    UPDATE gamificacion_recompensa 
+    SET nombre = ?, descripcion = ?, tipo = ?, puntos_requeridos = ?, 
+        icono = ?, premio = ?, orden = ?, estado = ?
+    WHERE id = ?
+  `;
+  
+  db.query(query, [nombre, descripcion, tipo, puntos_requeridos, icono, premio, orden, estado, id], (err, result) => {
+    if (err) {
+      console.error("Error al editar recompensa:", err);
+      return res.status(500).json({ error: "Error al editar recompensa" });
+    }
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Recompensa no encontrada" });
+    }
+    
+    res.status(200).json({ message: "Recompensa actualizada" });
+  });
+});
+
 module.exports = router;
