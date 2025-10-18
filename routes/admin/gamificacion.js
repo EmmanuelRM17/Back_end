@@ -86,4 +86,24 @@ router.put("/recompensas/:id", (req, res) => {
   });
 });
 
+// Eliminar recompensa
+router.delete("/recompensas/:id", (req, res) => {
+  const { id } = req.params;
+  
+  const query = "DELETE FROM gamificacion_recompensa WHERE id = ?";
+  
+  db.query(query, [id], (err, result) => {
+    if (err) {
+      console.error("Error al eliminar recompensa:", err);
+      return res.status(500).json({ error: "Error al eliminar recompensa" });
+    }
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Recompensa no encontrada" });
+    }
+    
+    res.status(200).json({ message: "Recompensa eliminada" });
+  });
+});
+
 module.exports = router;
